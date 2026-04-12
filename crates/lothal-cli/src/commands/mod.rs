@@ -6,6 +6,7 @@ pub mod demo;
 pub mod device;
 pub mod experiment;
 pub mod garden;
+pub mod geometry;
 pub mod ingest;
 pub mod init;
 pub mod livestock;

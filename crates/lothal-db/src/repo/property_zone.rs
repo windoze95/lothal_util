@@ -71,6 +71,19 @@ pub async fn list_property_zones_by_site(
     Ok(rows.iter().map(property_zone_from_row).collect())
 }
 
+pub async fn update_zone_shape(
+    pool: &PgPool,
+    zone_id: Uuid,
+    shape: serde_json::Value,
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query("UPDATE property_zones SET shape = $2 WHERE id = $1")
+        .bind(zone_id)
+        .bind(shape)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected())
+}
+
 pub async fn update_property_zone(
     pool: &PgPool,
     zone: &PropertyZone,
