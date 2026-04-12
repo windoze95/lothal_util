@@ -12,11 +12,36 @@
   <script src="/static/js/app.js" defer></script>
 </head>
 <body class="bg-[#0f1117] text-[#e8eaed] font-sans antialiased">
-  <div class="flex h-screen overflow-hidden">
-    {%- include "partials/sidebar.html" -%}
+  <div x-data="{ sidebarOpen: false }" class="flex h-screen overflow-hidden">
+    <!-- Mobile top bar -->
+    <header class="lg:hidden fixed top-0 inset-x-0 z-30 flex items-center justify-between px-4 h-14 bg-[#1a1d27] border-b border-[#2e3346]">
+      <button type="button"
+              class="p-2 -ml-2 rounded-md text-[#8b8fa3] hover:text-white"
+              @click="sidebarOpen = true"
+              aria-label="Open navigation">
+        <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/>
+        </svg>
+      </button>
+      <h1 class="text-base font-semibold text-white">Lothal</h1>
+      <div class="w-8"></div>
+    </header>
+
+    <!-- Mobile backdrop -->
+    <div x-show="sidebarOpen"
+         x-transition.opacity
+         @click="sidebarOpen = false"
+         class="lg:hidden fixed inset-0 z-40 bg-black/50"
+         style="display: none"></div>
+
+    <!-- Sidebar -->
+    <div :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
+         class="sidebar-drawer fixed inset-y-0 left-0 z-50 w-56 transform transition-transform lg:static lg:translate-x-0 lg:transform-none">
+      {%- include "partials/sidebar.html" -%}
+    </div>
 
     <!-- Main content area -->
-    <main class="flex-1 overflow-y-auto">
+    <main class="flex-1 overflow-y-auto pt-14 lg:pt-0">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {% block content %}{% endblock %}
       </div>
