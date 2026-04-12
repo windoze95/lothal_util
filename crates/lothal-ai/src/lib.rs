@@ -1,3 +1,4 @@
+pub mod anomaly;
 pub mod provider;
 pub mod extract;
 pub mod briefing;
