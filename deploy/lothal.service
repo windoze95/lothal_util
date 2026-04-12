@@ -1,0 +1,28 @@
+[Unit]
+Description=Lothal property-operations scheduler daemon
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lothal
+Group=lothal
+WorkingDirectory=/opt/lothal
+EnvironmentFile=/opt/lothal/.env
+ExecStart=/opt/lothal/bin/lothal daemon
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening — the daemon reads config from EnvironmentFile and talks
+# only to the DB, NWS, Anthropic, IMAP, HA. It does not need write access to
+# the rest of the filesystem.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/lothal
+
+[Install]
+WantedBy=multi-user.target
