@@ -189,8 +189,9 @@ async fn chat_send_partial(
             role: Role::User,
             content: user_msg,
         }],
-        max_tokens: 500,
+        max_tokens: 16000,
         temperature: 0.3,
+        budget_tokens: Some(32000),
     };
 
     let assistant_text = match client.complete(&request).await {

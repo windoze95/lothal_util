@@ -26,6 +26,7 @@ pub async fn generate_briefing(
         }],
         max_tokens: 512,
         temperature: 0.3,
+        budget_tokens: None,
     };
 
     let response = provider.complete(&request).await?;

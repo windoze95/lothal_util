@@ -66,6 +66,7 @@ pub async fn classify_signatures(
         }],
         max_tokens: 2048,
         temperature: 0.1,
+        budget_tokens: None,
     };
 
     let schema = classification_schema(signatures.len());

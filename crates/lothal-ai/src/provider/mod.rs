@@ -28,6 +28,10 @@ pub struct CompletionRequest {
     pub messages: Vec<Message>,
     pub max_tokens: u32,
     pub temperature: f32,
+    /// When set, enables extended thinking with this many budget tokens.
+    /// Anthropic only — ignored for Ollama. Temperature is forced to 1
+    /// when thinking is enabled (API requirement).
+    pub budget_tokens: Option<u32>,
 }
 
 /// Response from an LLM provider.
@@ -52,14 +56,14 @@ impl LlmClient {
     /// provider-specific vars (`OLLAMA_BASE_URL`, `OLLAMA_MODEL`,
     /// `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`).
     pub fn from_env() -> Result<Self, AiError> {
-        let provider = std::env::var("LOTHAL_LLM_PROVIDER").unwrap_or_else(|_| "ollama".into());
+        let provider = std::env::var("LOTHAL_LLM_PROVIDER").unwrap_or_else(|_| "anthropic".into());
 
         match provider.to_lowercase().as_str() {
             "ollama" => {
                 let base_url = std::env::var("OLLAMA_BASE_URL")
                     .unwrap_or_else(|_| "http://localhost:11434".into());
                 let model = std::env::var("OLLAMA_MODEL")
-                    .unwrap_or_else(|_| "gemma3:12b".into());
+                    .unwrap_or_else(|_| "gemma4:31b".into());
                 Ok(Self::Ollama(OllamaProvider::new(base_url, model)))
             }
             "anthropic" => {
@@ -69,7 +73,7 @@ impl LlmClient {
                     )
                 })?;
                 let model = std::env::var("ANTHROPIC_MODEL")
-                    .unwrap_or_else(|_| "claude-sonnet-4-20250514".into());
+                    .unwrap_or_else(|_| "claude-opus-4-6".into());
                 Ok(Self::Anthropic(AnthropicProvider::new(api_key, model)))
             }
             other => Err(AiError::ProviderNotConfigured(format!(

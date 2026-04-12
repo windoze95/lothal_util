@@ -68,6 +68,7 @@ impl OllamaProvider {
             messages: request.messages.clone(),
             max_tokens: request.max_tokens,
             temperature: request.temperature,
+            budget_tokens: None,
         };
 
         let messages = build_messages(&augmented);

@@ -104,6 +104,18 @@ Emporia gives per-circuit watts but doesn't know what's running. Classical signa
 - **Bill math** — LLM extracts, code validates. Models confidently round things.
 - **Forecasting** — Prophet/ARIMA/seasonal-naive beats an LLM on time-series and costs nothing.
 
+### 2e. Model Router (planned)
+
+**Problem:** `LlmClient::from_env()` picks one provider per process. The guiding principle says "local models for narrow/frequent tasks, frontier models for complex/rare reasoning" — but the code doesn't enforce this. You either run everything through Ollama or everything through Claude.
+
+**Solution:** Replace the single-provider `LlmClient` with a routing layer that picks the model per task based on complexity.
+
+- Each AI surface declares its tier: `Tier::Local` (bill parsing, briefings, NILM) or `Tier::Frontier` (MCP reasoning agent, hypothesis generation, complex maintenance diagnosis)
+- Router maps tiers to configured providers: local → Ollama/Gemma, frontier → Anthropic/Claude
+- Fallback chain: if the preferred provider for a tier is unavailable, try the other
+- Single configuration point: `LOTHAL_LOCAL_PROVIDER`, `LOTHAL_FRONTIER_PROVIDER` (or both set to the same provider for single-model setups)
+- Cost tracking: log token usage per tier so you can see what the frontier model is actually costing
+
 ---
 
 ## Phase 2.5: Property Operations Expansion -- IMPLEMENTED

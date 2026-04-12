@@ -29,13 +29,7 @@ impl AnthropicProvider {
     ) -> Result<CompletionResponse, AiError> {
         let messages = build_anthropic_messages(request);
 
-        let body = json!({
-            "model": self.model,
-            "max_tokens": request.max_tokens,
-            "temperature": request.temperature,
-            "system": request.system,
-            "messages": messages,
-        });
+        let body = build_request_body(&self.model, request, &messages, None);
 
         let resp = self
             .client
@@ -70,22 +64,14 @@ impl AnthropicProvider {
         let messages = build_anthropic_messages(request);
 
         let tool_name = "structured_output";
-        let body = json!({
-            "model": self.model,
-            "max_tokens": request.max_tokens,
-            "temperature": request.temperature,
-            "system": request.system,
-            "messages": messages,
-            "tools": [{
-                "name": tool_name,
-                "description": "Return structured data matching the required schema.",
-                "input_schema": schema,
-            }],
-            "tool_choice": {
-                "type": "tool",
-                "name": tool_name,
-            },
-        });
+        let tools = json!([{
+            "name": tool_name,
+            "description": "Return structured data matching the required schema.",
+            "input_schema": schema,
+        }]);
+        let mut body = build_request_body(&self.model, request, &messages, None);
+        body["tools"] = tools;
+        body["tool_choice"] = json!({ "type": "tool", "name": tool_name });
 
         let resp = self
             .client
@@ -147,6 +133,34 @@ impl AnthropicProvider {
 
         Ok(format!("Anthropic OK — model: {}", self.model))
     }
+}
+
+/// Build the JSON request body, optionally including extended thinking.
+fn build_request_body(
+    model: &str,
+    request: &CompletionRequest,
+    messages: &[serde_json::Value],
+    _extra: Option<()>,
+) -> serde_json::Value {
+    let mut body = json!({
+        "model": model,
+        "max_tokens": request.max_tokens,
+        "system": request.system,
+        "messages": messages,
+    });
+
+    if let Some(budget) = request.budget_tokens {
+        // Extended thinking: temperature must be 1, thinking block is required.
+        body["temperature"] = json!(1);
+        body["thinking"] = json!({
+            "type": "enabled",
+            "budget_tokens": budget,
+        });
+    } else {
+        body["temperature"] = json!(request.temperature);
+    }
+
+    body
 }
 
 fn build_anthropic_messages(request: &CompletionRequest) -> Vec<serde_json::Value> {

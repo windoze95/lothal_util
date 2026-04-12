@@ -130,5 +130,6 @@ Rules:
         }],
         max_tokens: 2048,
         temperature: 0.0,
+        budget_tokens: None,
     }
 }
