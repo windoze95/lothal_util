@@ -8,6 +8,7 @@ members = [
     "crates/lothal-ai",
     "crates/lothal-cli",
     "crates/lothal-web",
+    "crates/lothal-ontology",
 ]
 
 [workspace.package]
@@ -80,6 +81,10 @@ lothal-ingest = { path = "crates/lothal-ingest" }
 lothal-engine = { path = "crates/lothal-engine" }
 lothal-ai = { path = "crates/lothal-ai" }
 lothal-web = { path = "crates/lothal-web" }
+lothal-ontology = { path = "crates/lothal-ontology" }
+
+# Async traits
+async-trait = "0.1"
 
 # Web framework
 axum = { version = "0.8", features = ["ws"] }
