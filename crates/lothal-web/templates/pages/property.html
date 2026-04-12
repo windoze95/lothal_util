@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Property{% endblock %}
+{% block content %}
+<div class="space-y-6">
+  <h2 class="text-xl font-semibold text-white">Property Map</h2>
+
+  {% if zones.is_empty() %}
+  <div class="flex flex-col items-center justify-center py-16 text-center">
+    <div class="w-16 h-16 rounded-full bg-[#232736] flex items-center justify-center mb-4">
+      <svg class="w-8 h-8 text-[#8ac926]/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0z"/>
+      </svg>
+    </div>
+    <h3 class="text-lg font-medium text-[#8b8fa3] mb-2">No property zones defined</h3>
+    <p class="text-sm text-[#555a6e] max-w-sm">Run <code class="text-[#4f9cf7]">lothal property add-zone</code> to map your property.</p>
+  </div>
+  {% else %}
+
+  <!-- Property map (SVG) -->
+  <div class="bg-[#1a1d27] rounded-xl p-6 border border-[#2e3346]" x-data="{ selected: null }">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Map area -->
+      <div class="lg:col-span-2">
+        <svg viewBox="0 0 800 600" class="w-full rounded-lg bg-[#0f1117] border border-[#2e3346]">
+          {% for zone in &zones %}
+          {% let idx = loop.index0 %}
+          {% let x = (idx % 4) * 190 + 20 %}
+          {% let y = (idx / 4) * 180 + 20 %}
+          {% let colors = ["#3dd68c", "#8ac926", "#5bc0eb", "#f7c948", "#c084fc", "#f76c6c", "#fb923c", "#4f9cf7"] %}
+          {% let color = colors[idx % colors.len()] %}
+          <g @click="selected = '{{ zone.id }}'" class="cursor-pointer">
+            <rect x="{{ x }}" y="{{ y }}" width="170" height="150" rx="8"
+                  fill="{{ color }}22" stroke="{{ color }}66" stroke-width="1.5"
+                  class="transition-all hover:stroke-2" :stroke-width="selected === '{{ zone.id }}' ? '3' : '1.5'"/>
+            <text x="{{ x + 85 }}" y="{{ y + 70 }}" text-anchor="middle" fill="{{ color }}" font-size="13" font-weight="500">{{ zone.name }}</text>
+            <text x="{{ x + 85 }}" y="{{ y + 90 }}" text-anchor="middle" fill="#555a6e" font-size="11">{{ zone.kind }}</text>
+            {% match zone.area_sqft %}
+            {% when Some with (area) %}
+            <text x="{{ x + 85 }}" y="{{ y + 108 }}" text-anchor="middle" fill="#555a6e" font-size="10">{{ format!("{:.0}", area) }} sqft</text>
+            {% when None %}
+            {% endmatch %}
+          </g>
+          {% endfor %}
+        </svg>
+      </div>
+
+      <!-- Zone details panel -->
+      <div class="space-y-3">
+        <h3 class="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider">Zones ({{ zones.len() }})</h3>
+        {% for zone in &zones %}
+        <div class="bg-[#232736] rounded-lg p-3 border border-[#2e3346] text-sm cursor-pointer hover:border-[#555a6e] transition-colors"
+             @click="selected = '{{ zone.id }}'"
+             :class="selected === '{{ zone.id }}' ? 'border-[#4f9cf7]' : ''">
+          <p class="font-medium text-[#e8eaed]">{{ zone.name }}</p>
+          <p class="text-xs text-[#555a6e]">{{ zone.kind }}{% match zone.area_sqft %}{% when Some with (a) %} &middot; {{ format!("{:.0}", a) }} sqft{% when None %}{% endmatch %}</p>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

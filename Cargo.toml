@@ -7,6 +7,7 @@ members = [
     "crates/lothal-engine",
     "crates/lothal-ai",
     "crates/lothal-cli",
+    "crates/lothal-web",
 ]
 
 [workspace.package]
@@ -78,3 +79,10 @@ lothal-db = { path = "crates/lothal-db" }
 lothal-ingest = { path = "crates/lothal-ingest" }
 lothal-engine = { path = "crates/lothal-engine" }
 lothal-ai = { path = "crates/lothal-ai" }
+lothal-web = { path = "crates/lothal-web" }
+
+# Web framework
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["fs", "compression-br", "cors"] }
+askama = "0.15"
+askama_web = { version = "0.15", features = ["axum-0.8"] }

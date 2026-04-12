@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Energy{% endblock %}
+{% block content %}
+<div class="space-y-6">
+  <div class="flex items-center justify-between">
+    <h2 class="text-xl font-semibold text-white">Energy</h2>
+    <div class="flex gap-1 bg-[#1a1d27] rounded-lg p-1 border border-[#2e3346]">
+      <button hx-get="/partials/energy/chart?range=24h" hx-target="#usage-chart-container" hx-swap="innerHTML"
+              class="px-3 py-1.5 text-xs rounded-md transition-colors text-[#8b8fa3] hover:text-white">24h</button>
+      <button hx-get="/partials/energy/chart?range=7d" hx-target="#usage-chart-container" hx-swap="innerHTML"
+              class="px-3 py-1.5 text-xs rounded-md transition-colors bg-[#232736] text-white">7d</button>
+      <button hx-get="/partials/energy/chart?range=30d" hx-target="#usage-chart-container" hx-swap="innerHTML"
+              class="px-3 py-1.5 text-xs rounded-md transition-colors text-[#8b8fa3] hover:text-white">30d</button>
+      <button hx-get="/partials/energy/chart?range=1y" hx-target="#usage-chart-container" hx-swap="innerHTML"
+              class="px-3 py-1.5 text-xs rounded-md transition-colors text-[#8b8fa3] hover:text-white">1y</button>
+    </div>
+  </div>
+
+  <!-- Today's summary -->
+  <div class="grid grid-cols-2 gap-4">
+    <div class="bg-[#1a1d27] rounded-xl p-5 border border-[#2e3346]">
+      <p class="text-xs font-medium text-[#8b8fa3] uppercase tracking-wider mb-2">Today's Usage</p>
+      <span class="text-3xl font-semibold text-[#f7c948]">{{ format!("{:.1}", self.total_kwh_today) }}</span>
+      <span class="text-sm text-[#555a6e] ml-1">kWh</span>
+    </div>
+    <div class="bg-[#1a1d27] rounded-xl p-5 border border-[#2e3346]">
+      <p class="text-xs font-medium text-[#8b8fa3] uppercase tracking-wider mb-2">Estimated Cost</p>
+      <span class="text-3xl font-semibold text-[#e8eaed]">${{ format!("{:.2}", self.estimated_cost_today) }}</span>
+    </div>
+  </div>
+
+  <!-- Usage chart -->
+  <div class="bg-[#1a1d27] rounded-xl p-6 border border-[#2e3346]">
+    <h3 class="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider mb-4">Usage Over Time</h3>
+    <div id="usage-chart-container">
+      <div class="relative" style="height: 300px">
+        <canvas id="energy-usage-chart" data-chart-config='{{ usage_chart }}' class="lothal-chart w-full h-full"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Circuit breakdown -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="bg-[#1a1d27] rounded-xl p-6 border border-[#2e3346]">
+      <h3 class="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider mb-4">Circuit Breakdown</h3>
+      {% if circuits.is_empty() %}
+      <p class="text-sm text-[#555a6e]">No circuit data available. Connect an Emporia Vue via MQTT to see per-circuit usage.</p>
+      {% else %}
+      <div class="relative" style="height: 250px">
+        <canvas id="circuit-breakdown-chart" data-chart-config='{{ circuit_chart }}' class="lothal-chart w-full h-full"></canvas>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Baseline model -->
+    <div class="bg-[#1a1d27] rounded-xl p-6 border border-[#2e3346]">
+      <h3 class="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider mb-4">Baseline Model</h3>
+      {% match baseline_r_squared %}
+      {% when Some with (r2) %}
+      <div class="space-y-4">
+        <div class="grid grid-cols-3 gap-4">
+          <div>
+            <p class="text-xs text-[#555a6e]">R&sup2;</p>
+            <p class="text-lg font-semibold text-[#e8eaed]">{{ format!("{:.2}", r2) }}</p>
+          </div>
+          {% match baseline_slope %}
+          {% when Some with (slope) %}
+          <div>
+            <p class="text-xs text-[#555a6e]">Slope</p>
+            <p class="text-lg font-semibold text-[#e8eaed]">{{ format!("{:.2}", slope) }}</p>
+            <p class="text-xs text-[#555a6e]">kWh/DD</p>
+          </div>
+          {% when None %}
+          {% endmatch %}
+          {% match baseline_intercept %}
+          {% when Some with (intercept) %}
+          <div>
+            <p class="text-xs text-[#555a6e]">Base Load</p>
+            <p class="text-lg font-semibold text-[#e8eaed]">{{ format!("{:.1}", intercept) }}</p>
+            <p class="text-xs text-[#555a6e]">kWh/day</p>
+          </div>
+          {% when None %}
+          {% endmatch %}
+        </div>
+      </div>
+      {% when None %}
+      <p class="text-sm text-[#555a6e]">Not enough bill and weather data to compute a baseline. Need at least 3 months of bills.</p>
+      {% endmatch %}
+    </div>
+  </div>
+
+  <!-- Live Power (WebSocket) -->
+  <div class="bg-[#1a1d27] rounded-xl p-6 border border-[#2e3346]">
+    <h3 class="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider mb-4">Live Power</h3>
+    <div class="flex items-baseline gap-2">
+      <span class="text-4xl font-semibold text-[#f7c948]" id="live-power-value">--</span>
+      <span class="text-sm text-[#555a6e]">W</span>
+      <div class="w-2 h-2 rounded-full bg-[#3dd68c] animate-pulse ml-2"></div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+/*
+ * Lothal Property Intelligence — Dark Theme
+ *
+ * This file is processed by the Tailwind CSS standalone CLI.
+ * Run: tailwindcss -i static/css/input.css -o static/css/app.css --watch
+ */
+
+/* Custom theme tokens as CSS custom properties */
+@theme {
+  --color-bg: #0f1117;
+  --color-surface: #1a1d27;
+  --color-elevated: #232736;
+  --color-border: #2e3346;
+
+  --color-energy: #f7c948;
+  --color-water: #5bc0eb;
+  --color-bio: #8ac926;
+  --color-heat: #f76c6c;
+  --color-positive: #3dd68c;
+  --color-negative: #f76c6c;
+  --color-neutral: #4f9cf7;
+
+  --color-text: #e8eaed;
+  --color-muted: #8b8fa3;
+  --color-dim: #555a6e;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Custom scrollbar for dark theme */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-dim);
+}
+
+/* htmx loading indicator */
+.htmx-indicator {
+  display: none;
+}
+.htmx-request .htmx-indicator {
+  display: inline-block;
+}
+.htmx-request.htmx-indicator {
+  display: inline-block;
+}
+
+/* Line clamp utility */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Pulse animation for live indicator */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.animate-pulse {
+  animation: pulse-dot 2s ease-in-out infinite;
+}

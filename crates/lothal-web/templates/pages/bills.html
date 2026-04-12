@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Bills{% endblock %}
+{% block content %}
+<div class="space-y-6">
+  <h2 class="text-xl font-semibold text-white">Bills &amp; Costs</h2>
+
+  {% if bills.is_empty() %}
+  <div class="flex flex-col items-center justify-center py-16 text-center">
+    <div class="w-16 h-16 rounded-full bg-[#232736] flex items-center justify-center mb-4">
+      <svg class="w-8 h-8 text-[#f7c948]/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75"/>
+      </svg>
+    </div>
+    <h3 class="text-lg font-medium text-[#8b8fa3] mb-2">No bills imported</h3>
+    <p class="text-sm text-[#555a6e] max-w-sm">Run <code class="text-[#4f9cf7]">lothal bill import &lt;file&gt;</code> to import utility bills.</p>
+  </div>
+  {% else %}
+
+  <!-- Chart -->
+  <div class="bg-[#1a1d27] rounded-xl p-6 border border-[#2e3346]">
+    <h3 class="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider mb-4">Monthly Costs</h3>
+    <div class="relative" style="height: 300px">
+      <canvas id="bills-chart" data-chart-config='{{ bills_chart }}' class="lothal-chart w-full h-full"></canvas>
+    </div>
+  </div>
+
+  <!-- Bills table -->
+  <div class="bg-[#1a1d27] rounded-xl border border-[#2e3346] overflow-hidden">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="border-b border-[#2e3346]">
+          <th class="text-left px-6 py-3 text-xs font-medium text-[#555a6e] uppercase tracking-wider">Period</th>
+          <th class="text-left px-6 py-3 text-xs font-medium text-[#555a6e] uppercase tracking-wider">Type</th>
+          <th class="text-right px-6 py-3 text-xs font-medium text-[#555a6e] uppercase tracking-wider">Usage</th>
+          <th class="text-right px-6 py-3 text-xs font-medium text-[#555a6e] uppercase tracking-wider">Amount</th>
+          <th class="text-right px-6 py-3 text-xs font-medium text-[#555a6e] uppercase tracking-wider">$/day</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for bill in &bills %}
+        <tr class="border-b border-[#2e3346]/50 hover:bg-[#232736] transition-colors">
+          <td class="px-6 py-3 text-[#e8eaed]">{{ bill.period }}</td>
+          <td class="px-6 py-3 text-[#8b8fa3]">{{ bill.utility_type }}</td>
+          <td class="px-6 py-3 text-right text-[#e8eaed]">{{ format!("{:.1}", bill.usage) }} {{ bill.usage_unit }}</td>
+          <td class="px-6 py-3 text-right text-[#e8eaed] font-medium">${{ format!("{:.2}", bill.amount) }}</td>
+          <td class="px-6 py-3 text-right text-[#8b8fa3]">${{ format!("{:.2}", bill.daily_rate) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

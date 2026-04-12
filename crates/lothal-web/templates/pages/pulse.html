@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Pulse{% endblock %}
+{% block content %}
+<div class="space-y-6">
+  <!-- Page header -->
+  <div class="flex items-center justify-between">
+    <h2 class="text-xl font-semibold text-white">Pulse</h2>
+    <span class="text-sm text-[#555a6e]">{{ briefing_date }}</span>
+  </div>
+
+  <!-- Alert bar -->
+  {% if !alerts.is_empty() %}
+  <div class="space-y-2">
+    {% for alert in &alerts %}
+    <div class="flex items-center gap-3 px-4 py-3 rounded-lg border
+                {% match alert.severity %}
+                {% when AlertSeverity::Danger %}bg-[#f76c6c]/10 border-[#f76c6c]/30 text-[#f76c6c]
+                {% when AlertSeverity::Warning %}bg-[#f7c948]/10 border-[#f7c948]/30 text-[#f7c948]
+                {% when AlertSeverity::Info %}bg-[#4f9cf7]/10 border-[#4f9cf7]/30 text-[#4f9cf7]
+                {% endmatch %}">
+      <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+      </svg>
+      <span class="text-sm">{{ alert.message }}</span>
+      {% match alert.href %}
+      {% when Some with (link) %}
+      <a href="{{ link }}" class="ml-auto text-xs underline opacity-70 hover:opacity-100">View</a>
+      {% when None %}
+      {% endmatch %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Briefing card -->
+  <div class="bg-[#1a1d27] rounded-xl p-6 border border-[#2e3346]">
+    <div class="flex items-center gap-2 mb-4">
+      <div class="w-2 h-2 rounded-full bg-[#3dd68c] animate-pulse"></div>
+      <h3 class="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider">Today's Briefing</h3>
+    </div>
+    {% match briefing %}
+    {% when Some with (text) %}
+    <p class="text-[#e8eaed] leading-relaxed text-[15px]">{{ text }}</p>
+    {% when None %}
+    <p class="text-[#555a6e] italic">No briefing generated yet. Run <code class="text-[#4f9cf7]">lothal ai briefing</code> to create one.</p>
+    {% endmatch %}
+  </div>
+
+  <!-- Stat cards -->
+  {% if !stats.is_empty() %}
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    {% for card in &stats %}
+    {% include "partials/stat_card.html" %}
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Bottom row: experiments + top recommendation -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Active experiments -->
+    <div class="bg-[#1a1d27] rounded-xl p-6 border border-[#2e3346]">
+      <h3 class="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider mb-4">Active Experiments</h3>
+      {% if experiments.is_empty() %}
+      <p class="text-sm text-[#555a6e]">No active experiments. Visit the <a href="/lab" class="text-[#4f9cf7] hover:underline">Lab</a> to start one.</p>
+      {% else %}
+      <ul class="space-y-3">
+        {% for exp in &experiments %}
+        <li class="flex items-center justify-between">
+          <span class="text-sm text-[#e8eaed]">{{ exp.title }}</span>
+          <span class="text-xs px-2 py-0.5 rounded-full bg-[#3dd68c]/15 text-[#3dd68c]">{{ exp.status }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+
+    <!-- Top recommendation -->
+    <div class="bg-[#1a1d27] rounded-xl p-6 border border-[#2e3346]">
+      <h3 class="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider mb-4">Top Recommendation</h3>
+      {% match top_recommendation %}
+      {% when Some with (rec) %}
+      <div>
+        <h4 class="text-[#e8eaed] font-medium mb-2">{{ rec.title }}</h4>
+        <p class="text-sm text-[#8b8fa3] mb-3 line-clamp-2">{{ rec.description }}</p>
+        <div class="flex items-center gap-4 text-xs text-[#555a6e]">
+          <span class="text-[#3dd68c] font-medium">${{ format!("{:.0}", rec.annual_savings) }}/yr</span>
+          <span>{{ format!("{:.1}", rec.payback_years) }}yr payback</span>
+          <span>{{ format!("{:.0}", rec.confidence * 100.0) }}% confidence</span>
+        </div>
+        <a href="/lab" class="inline-block mt-4 text-sm text-[#4f9cf7] hover:underline">View all recommendations &rarr;</a>
+      </div>
+      {% when None %}
+      <p class="text-sm text-[#555a6e]">Add devices and bills to generate recommendations.</p>
+      {% endmatch %}
+    </div>
+  </div>
+</div>
+{% endblock %}

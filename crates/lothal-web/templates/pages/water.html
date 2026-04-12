@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Water{% endblock %}
+{% block content %}
+<div class="space-y-6">
+  <h2 class="text-xl font-semibold text-white">Water Systems</h2>
+
+  {% if !has_water_data %}
+  <div class="flex flex-col items-center justify-center py-16 text-center">
+    <div class="w-16 h-16 rounded-full bg-[#232736] flex items-center justify-center mb-4">
+      <svg class="w-8 h-8 text-[#5bc0eb]/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747"/>
+      </svg>
+    </div>
+    <h3 class="text-lg font-medium text-[#8b8fa3] mb-2">No water systems configured</h3>
+    <p class="text-sm text-[#555a6e] max-w-sm">Run <code class="text-[#4f9cf7]">lothal water add-pool</code> or <code class="text-[#4f9cf7]">lothal water add-septic</code> to add water system data.</p>
+  </div>
+  {% else %}
+
+  <!-- Pools -->
+  {% if !pools.is_empty() %}
+  <div class="space-y-4">
+    <h3 class="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider">Pools</h3>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {% for pool in &pools %}
+      <div class="bg-[#1a1d27] rounded-xl p-6 border border-[#2e3346]">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="w-3 h-3 rounded-full bg-[#5bc0eb]"></div>
+          <h4 class="font-medium text-[#e8eaed]">{{ pool.name }}</h4>
+        </div>
+        <div class="grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <p class="text-[#555a6e]">Volume</p>
+            <p class="text-[#e8eaed]">{{ format!("{:.0}", pool.volume_gallons) }} gal</p>
+          </div>
+          {% match pool.pump_runtime_hours %}
+          {% when Some with (hours) %}
+          <div>
+            <p class="text-[#555a6e]">Pump Runtime</p>
+            <p class="text-[#e8eaed]">{{ format!("{:.1}", hours) }}h today</p>
+          </div>
+          {% when None %}
+          {% endmatch %}
+          {% match pool.last_temp_f %}
+          {% when Some with (temp) %}
+          <div>
+            <p class="text-[#555a6e]">Temperature</p>
+            <p class="text-[#e8eaed]">{{ format!("{:.0}", temp) }}&deg;F</p>
+          </div>
+          {% when None %}
+          {% endmatch %}
+          {% match pool.last_ph %}
+          {% when Some with (ph) %}
+          <div>
+            <p class="text-[#555a6e]">pH</p>
+            <p class="text-[#e8eaed]">{{ format!("{:.1}", ph) }}</p>
+          </div>
+          {% when None %}
+          {% endmatch %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Septic -->
+  {% match septic %}
+  {% when Some with (s) %}
+  <div class="space-y-4">
+    <h3 class="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider">Septic System</h3>
+    <div class="bg-[#1a1d27] rounded-xl p-6 border border-[#2e3346]">
+      <div class="grid grid-cols-3 gap-6">
+        <div>
+          <p class="text-xs text-[#555a6e] mb-1">Tank Capacity</p>
+          <p class="text-xl font-semibold text-[#e8eaed]">{{ format!("{:.0}", s.tank_capacity_gallons) }}</p>
+          <p class="text-xs text-[#555a6e]">gallons</p>
+        </div>
+        <div>
+          <p class="text-xs text-[#555a6e] mb-1">Pump-Out</p>
+          {% if s.is_overdue %}
+          <p class="text-xl font-semibold text-[#f76c6c]">OVERDUE</p>
+          <p class="text-xs text-[#f76c6c]">{{ s.days_until_pump.abs() }} days past</p>
+          {% else %}
+          <p class="text-xl font-semibold text-[#e8eaed]">{{ s.days_until_pump }}</p>
+          <p class="text-xs text-[#555a6e]">days until due</p>
+          {% endif %}
+        </div>
+        {% match s.daily_load_estimate %}
+        {% when Some with (load) %}
+        <div>
+          <p class="text-xs text-[#555a6e] mb-1">Daily Load</p>
+          <p class="text-xl font-semibold text-[#e8eaed]">{{ format!("{:.0}", load) }}</p>
+          <p class="text-xs text-[#555a6e]">gal/day</p>
+        </div>
+        {% when None %}
+        {% endmatch %}
+      </div>
+    </div>
+  </div>
+  {% when None %}
+  {% endmatch %}
+
+  {% endif %}
+</div>
+{% endblock %}

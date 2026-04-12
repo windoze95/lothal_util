@@ -1,0 +1,25 @@
+<a href="{{ card.href }}"
+   class="block bg-[#1a1d27] rounded-xl p-5 border border-[#2e3346] hover:border-[#555a6e] transition-colors group">
+  <p class="text-xs font-medium text-[#8b8fa3] uppercase tracking-wider mb-2">{{ card.label }}</p>
+  <div class="flex items-baseline gap-2">
+    <span class="text-2xl font-semibold text-[#e8eaed] group-hover:text-white">{{ card.value }}</span>
+    {% if !card.unit.is_empty() %}
+    <span class="text-sm text-[#555a6e]">{{ card.unit }}</span>
+    {% endif %}
+  </div>
+  {% match card.trend %}
+  {% when Some with (t) %}
+  <div class="mt-2 flex items-center gap-1 text-xs">
+    {% if *t > 0.0 %}
+    <span class="text-[#f76c6c]">&#9650; {{ format!("{:.1}", t.abs()) }}%</span>
+    <span class="text-[#555a6e]">above baseline</span>
+    {% else if *t < 0.0 %}
+    <span class="text-[#3dd68c]">&#9660; {{ format!("{:.1}", t.abs()) }}%</span>
+    <span class="text-[#555a6e]">below baseline</span>
+    {% else %}
+    <span class="text-[#8b8fa3]">on baseline</span>
+    {% endif %}
+  </div>
+  {% when None %}
+  {% endmatch %}
+</a>

@@ -8,7 +8,7 @@ Built for a 1984 two-story on 0.89 acres in Guthrie, OK — but the ontology is 
 
 ## Architecture
 
-Rust workspace with six crates:
+Rust workspace with seven crates:
 
 | Crate | Purpose |
 |---|---|
@@ -18,6 +18,7 @@ Rust workspace with six crates:
 | `lothal-engine` | Analytics — weather-normalized baselines for energy and water, simulation engine (device swap, TOU shift, setpoint change, cistern, pool cover, tree removal, flock expansion), property-wide recommendation generator (13 templates), experiment evaluator |
 | `lothal-ai` | AI layer — LLM bill parsing with structured output, daily property operations briefings, MCP reasoning agent (14 tools), NILM device identification |
 | `lothal-cli` | CLI binary — interactive onboarding wizard, data management, property zones, water systems, livestock tracking, garden management, querying, simulation, experiment tracking, recommendations, reports, AI commands |
+| `lothal-web` | Web dashboard — Axum + Askama + htmx dark-theme dashboard with 8 pages (Pulse/Energy/Water/Property/Land/Lab/Bills/Chat), Chart.js visualizations, WebSocket real-time readings, LLM-powered chat |
 
 ## Quick Start
 
@@ -102,6 +103,24 @@ lothal ai mcp-server                     Start MCP server for reasoning agent
 lothal ai ingest-email [--once]          Poll email for utility bill PDFs
 lothal ai identify <circuit|all>         NILM device identification
 ```
+
+## Web Dashboard
+
+```bash
+cargo run -p lothal-web
+# Open http://localhost:3000
+```
+
+Eight pages accessible via sidebar navigation:
+
+- **Pulse** — AI briefing, stat cards, alerts, experiments, top recommendation
+- **Energy** — usage chart (24h/7d/30d/1y), circuit breakdown, baseline model, live power
+- **Water** — pool status, septic pump-out countdown
+- **Property** — interactive SVG zone map
+- **Land** — livestock (egg/feed tracking), garden beds
+- **Lab** — recommendations ranked by ROI, experiment kanban, simulations
+- **Bills** — monthly stacked bar chart, bill table
+- **Chat** — natural language queries via LLM
 
 ## Ontology
 

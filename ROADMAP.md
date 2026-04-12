@@ -131,33 +131,39 @@ Expanded the ontology from "home efficiency" to "property operations". Six new m
 
 ---
 
-## Phase 3: Web Dashboard (lothal-web)
+## Phase 3: Web Dashboard (lothal-web) -- IMPLEMENTED
 
-New crate: `crates/lothal-web/` using **Axum** + **htmx** with server-rendered templates.
+New crate: `crates/lothal-web/` — "Property Intelligence OS" with briefing-first design philosophy. Dark theme, self-configuring based on ontology entities, progressive disclosure.
 
-### API Layer (Axum)
-- REST endpoints for all entities (CRUD for sites, devices, bills, etc.)
-- JSON API for frontend consumption and future integrations
-- WebSocket endpoint for real-time reading streams (from MQTT subscriber)
-- Shared state: PgPool + app config passed via Axum state
+### Architecture
+- **Axum 0.8** REST + WebSocket server, single binary on `:3000`
+- **Askama 0.15** compile-time checked HTML templates with `askama_web` axum-0.8 integration
+- **htmx 2.0** for dynamic partial updates (chart range changes, chat, simulations)
+- **Alpine.js 3** for client-side interactivity (tabs, map clicks, dropdowns)
+- **Chart.js 4** for data visualization (line, doughnut, stacked bar)
+- **Tailwind CSS** utility classes (hand-written dark theme, standalone binary for production)
+- **WebSocket** broadcast channel for real-time reading fan-out
 
-### Dashboard Pages
-- **Home / Overview** — site summary card, current month snapshot, weather, active experiments, top recommendation, daily briefing text
-- **Ontology Explorer** — interactive tree: site > structures > zones > devices > circuits
-- **Bills & Costs** — monthly bar/stacked-area charts, drill-down to line items, month-over-month and YoY comparisons
-- **Live Readings** — real-time charts via WebSocket, configurable time windows
-- **Simulation Playground** — interactive "what if" forms with sliders, side-by-side cost visualization
-- **Experiments** — kanban board (planned / active / completed / inconclusive), pre/post weather-normalized charts
-- **Recommendations** — prioritized cards with ROI, "Start Experiment" button
-- **Chat** — natural language interface to the reasoning agent (Phase 2c)
-- **Reports** — monthly/annual generation, printable output
+### Dashboard Pages (8)
+- **Pulse** (/) — AI briefing card, stat cards (energy/cost/weather/eggs), alerts bar, active experiments, top recommendation
+- **Energy** (/energy) — daily usage chart with htmx time-range switcher, circuit breakdown doughnut, baseline model stats, live power via WebSocket
+- **Water** (/water) — pool cards (volume, chemistry, pump runtime), septic gauge with pump-out countdown
+- **Property** (/property) — SVG zone map with Alpine.js click interaction, zone detail panel
+- **Land** (/land) — livestock tab (flock cards with egg/feed stats), garden tab (bed cards), Alpine.js tab switching
+- **Lab** (/lab) — recommendation cards ranked by ROI with priority gauge, experiment kanban (planned/active/completed), simulation form via htmx
+- **Bills** (/bills) — stacked bar chart by utility type, sortable bill table with period/usage/amount/daily rate
+- **Chat** (/chat) — message bubbles UI, LLM-powered responses via lothal-ai provider, htmx form submission
 
-### Tech
-- Templates: Askama or Maud (compile-time checked)
-- Charts: Chart.js or Plotly.js
-- Styling: Tailwind CSS (standalone binary, no Node)
-- WebSocket: tokio-tungstenite
-- Auth: optional, single-user default
+### API Layer
+- JSON endpoints: `/api/v1/{site,devices,bills,recommendations,property}`
+- htmx partials: `/partials/{energy/chart,energy/circuits,bills/chart,lab/simulate,chat/send}`
+- WebSocket: `/ws/readings` — broadcast channel fan-out for live sensor data
+- Static files: `/static/` served via tower-http ServeDir
+
+### Stats
+- ~1,570 lines Rust (11 source files)
+- ~800 lines HTML templates (12 template files)
+- Dark theme: #0f1117 base, #1a1d27 surfaces, semantic colors for energy/water/bio/heat
 
 ---
 

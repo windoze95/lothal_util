@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0f1117">
+  <title>{% block title %}Lothal{% endblock %} — Property Intelligence</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/js/vendor/htmx.min.js" defer></script>
+  <script src="/static/js/vendor/alpine.min.js" defer></script>
+  <script src="/static/js/vendor/chart.min.js"></script>
+  <script src="/static/js/app.js" defer></script>
+</head>
+<body class="bg-[#0f1117] text-[#e8eaed] font-sans antialiased">
+  <div class="flex h-screen overflow-hidden">
+    {%- include "partials/sidebar.html" -%}
+
+    <!-- Main content area -->
+    <main class="flex-1 overflow-y-auto">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+  </div>
+</body>
+</html>

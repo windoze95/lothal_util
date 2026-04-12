@@ -1,0 +1,33 @@
+[package]
+name = "lothal-web"
+description = "Web dashboard for the lothal property operations system"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "lothal-web"
+path = "src/main.rs"
+
+[dependencies]
+lothal-core = { workspace = true }
+lothal-db = { workspace = true }
+lothal-engine = { workspace = true }
+lothal-ai = { workspace = true }
+
+axum = { workspace = true }
+tower-http = { workspace = true }
+askama = { workspace = true }
+askama_web = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+dotenvy = { workspace = true }
+sqlx = { workspace = true }
