@@ -6,6 +6,7 @@ pub mod indexer;
 pub mod query;
 pub mod action;
 pub mod tools;
+pub mod describe_impls;
 
 pub use uri::ObjectUri;
 pub use object::{Describe, ObjectRecord, ObjectRef};
