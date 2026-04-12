@@ -91,13 +91,35 @@ pub async fn gather_context(
         fetch_active_experiments(pool, site_id),
     )?;
 
-    // Property operations context — fetched in parallel, errors swallowed to
-    // not block the briefing if property data isn't set up yet.
+    // Property operations context — fetched in parallel. Errors are logged but
+    // do not block the briefing (a missing query result and a failed query
+    // both degrade gracefully, but only one is a bug).
     let (pool_status, livestock_summary, septic_alert) = tokio::join!(
         fetch_pool_status(pool, site_id),
         fetch_livestock_summary(pool, site_id, date),
         fetch_septic_alert(pool, site_id),
     );
+    let pool_status = match pool_status {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("pool status query failed: {e}");
+            None
+        }
+    };
+    let livestock_summary = match livestock_summary {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("livestock summary query failed: {e}");
+            None
+        }
+    };
+    let septic_alert = match septic_alert {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("septic alert query failed: {e}");
+            None
+        }
+    };
 
     // Compute baseline comparison if we have weather and usage data.
     let baseline_comparison = match (&weather, total_kwh) {
@@ -120,9 +142,9 @@ pub async fn gather_context(
         circuit_anomalies,
         maintenance_due,
         active_experiments,
-        pool_status: pool_status.ok().flatten(),
-        livestock_summary: livestock_summary.ok().flatten(),
-        septic_alert: septic_alert.ok().flatten(),
+        pool_status,
+        livestock_summary,
+        septic_alert,
     })
 }
 
