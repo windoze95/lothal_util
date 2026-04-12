@@ -9,7 +9,6 @@ use serde::Deserialize;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use lothal_ai::provider::{CompletionRequest, LlmClient, Message, Role};
 use lothal_core::ontology::utility::UtilityType;
 
 use crate::charts;
@@ -23,7 +22,6 @@ pub fn router() -> Router<AppState> {
         .route("/partials/energy/circuits", get(circuits_partial))
         .route("/partials/bills/chart", get(bills_chart_partial))
         .route("/partials/lab/simulate", post(simulate_partial))
-        .route("/partials/chat/send", post(chat_send_partial))
 }
 
 #[derive(Deserialize)]
@@ -143,76 +141,6 @@ async fn simulate_partial(
     ))
 }
 
-#[derive(Deserialize)]
-pub struct ChatMessage {
-    pub message: Option<String>,
-}
-
-async fn chat_send_partial(
-    State(_state): State<AppState>,
-    axum::Form(form): axum::Form<ChatMessage>,
-) -> Result<Html<String>, WebError> {
-    let user_msg = form.message.unwrap_or_default();
-    if user_msg.is_empty() {
-        return Ok(Html(String::new()));
-    }
-
-    let user_bubble = format!(
-        r#"<div class="flex justify-end mb-4">
-            <div class="bg-blue-600/20 border border-blue-500/30 rounded-xl px-4 py-3 max-w-[80%]">
-                <p class="text-sm text-[#e8eaed]">{}</p>
-            </div>
-        </div>"#,
-        html_escape(&user_msg),
-    );
-
-    let client = match LlmClient::from_env() {
-        Ok(c) => c,
-        Err(_) => {
-            return Ok(Html(format!(
-                r#"{user_bubble}
-        <div class="flex justify-start mb-4">
-            <div class="bg-[#232736] rounded-xl px-4 py-3 max-w-[80%] border border-[#2e3346]">
-                <p class="text-sm text-[#8b8fa3]">LLM not configured. Set LOTHAL_LLM_PROVIDER and the appropriate API key.</p>
-            </div>
-        </div>"#,
-            )));
-        }
-    };
-
-    let request = CompletionRequest {
-        system: "You are Lothal, a property intelligence agent. Answer questions about the \
-                 user's property including energy usage, bills, water systems, livestock, \
-                 garden, and recommendations. Be specific with numbers when available."
-            .into(),
-        messages: vec![Message {
-            role: Role::User,
-            content: user_msg,
-        }],
-        max_tokens: 16000,
-        temperature: 0.3,
-        budget_tokens: Some(32000),
-    };
-
-    let assistant_text = match client.complete(&request).await {
-        Ok(resp) => resp.content,
-        Err(e) => {
-            tracing::error!(error = %e, "LLM completion failed");
-            format!("Sorry, I couldn't process that request: {e}")
-        }
-    };
-
-    Ok(Html(format!(
-        r#"{user_bubble}
-        <div class="flex justify-start mb-4">
-            <div class="bg-[#232736] rounded-xl px-4 py-3 max-w-[80%] border border-[#2e3346]">
-                <p class="text-sm text-[#8b8fa3]">{}</p>
-            </div>
-        </div>"#,
-        html_escape(&assistant_text),
-    )))
-}
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -272,9 +200,3 @@ async fn daily_energy_totals(
         .collect())
 }
 
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-}

@@ -227,13 +227,6 @@ pub struct BillsPage {
     pub bills_chart: String,
 }
 
-#[derive(Template, WebTemplate)]
-#[template(path = "pages/chat.html")]
-pub struct ChatPage {
-    pub active_page: String,
-    pub site_name: String,
-}
-
 // ---------------------------------------------------------------------------
 // Partial templates — htmx fragment responses
 // ---------------------------------------------------------------------------
