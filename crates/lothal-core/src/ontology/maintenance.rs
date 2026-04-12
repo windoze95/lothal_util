@@ -46,6 +46,10 @@ impl MaintenanceEvent {
 pub enum MaintenanceTarget {
     Device(Uuid),
     Structure(Uuid),
+    PropertyZone(Uuid),
+    Pool(Uuid),
+    Tree(Uuid),
+    SepticSystem(Uuid),
 }
 
 impl MaintenanceTarget {
@@ -53,12 +57,21 @@ impl MaintenanceTarget {
         match self {
             Self::Device(_) => "device",
             Self::Structure(_) => "structure",
+            Self::PropertyZone(_) => "property_zone",
+            Self::Pool(_) => "pool",
+            Self::Tree(_) => "tree",
+            Self::SepticSystem(_) => "septic_system",
         }
     }
 
     pub fn target_id(&self) -> Uuid {
         match self {
-            Self::Device(id) | Self::Structure(id) => *id,
+            Self::Device(id)
+            | Self::Structure(id)
+            | Self::PropertyZone(id)
+            | Self::Pool(id)
+            | Self::Tree(id)
+            | Self::SepticSystem(id) => *id,
         }
     }
 }
@@ -75,6 +88,12 @@ pub enum MaintenanceType {
     SepticPump,
     PoolService,
     PestControl,
+    CoopCleaning,
+    PaddockRotation,
+    CompostTurning,
+    GardenAmendment,
+    TreeTrimming,
+    TreeRemoval,
     Other,
 }
 
@@ -90,6 +109,12 @@ impl std::fmt::Display for MaintenanceType {
             Self::SepticPump => write!(f, "Septic Pump"),
             Self::PoolService => write!(f, "Pool Service"),
             Self::PestControl => write!(f, "Pest Control"),
+            Self::CoopCleaning => write!(f, "Coop Cleaning"),
+            Self::PaddockRotation => write!(f, "Paddock Rotation"),
+            Self::CompostTurning => write!(f, "Compost Turning"),
+            Self::GardenAmendment => write!(f, "Garden Amendment"),
+            Self::TreeTrimming => write!(f, "Tree Trimming"),
+            Self::TreeRemoval => write!(f, "Tree Removal"),
             Self::Other => write!(f, "Other"),
         }
     }

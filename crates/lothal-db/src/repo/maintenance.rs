@@ -95,6 +95,10 @@ fn maintenance_from_row(row: &sqlx::postgres::PgRow) -> MaintenanceEvent {
     let target = match target_type.as_str() {
         "device" => MaintenanceTarget::Device(target_id),
         "structure" => MaintenanceTarget::Structure(target_id),
+        "property_zone" => MaintenanceTarget::PropertyZone(target_id),
+        "pool" => MaintenanceTarget::Pool(target_id),
+        "tree" => MaintenanceTarget::Tree(target_id),
+        "septic_system" => MaintenanceTarget::SepticSystem(target_id),
         _ => MaintenanceTarget::Device(target_id), // fallback
     };
 
@@ -125,6 +129,12 @@ fn parse_maintenance_type(s: &str) -> MaintenanceType {
         "septic pump" => MaintenanceType::SepticPump,
         "pool service" => MaintenanceType::PoolService,
         "pest control" => MaintenanceType::PestControl,
+        "coop cleaning" => MaintenanceType::CoopCleaning,
+        "paddock rotation" => MaintenanceType::PaddockRotation,
+        "compost turning" => MaintenanceType::CompostTurning,
+        "garden amendment" => MaintenanceType::GardenAmendment,
+        "tree trimming" => MaintenanceType::TreeTrimming,
+        "tree removal" => MaintenanceType::TreeRemoval,
         _ => MaintenanceType::Other,
     }
 }

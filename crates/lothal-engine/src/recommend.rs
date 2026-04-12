@@ -8,6 +8,9 @@ use uuid::Uuid;
 use lothal_core::ontology::bill::Bill;
 use lothal_core::ontology::device::{Device, DeviceKind};
 use lothal_core::ontology::experiment::{HypothesisCategory, Recommendation};
+use lothal_core::ontology::livestock::Flock;
+use lothal_core::ontology::tree::Tree;
+use lothal_core::ontology::water::{Pool, SepticSystem, WaterSource};
 use lothal_core::Usd;
 
 use crate::baseline::BaselineModel;
@@ -32,6 +35,17 @@ pub struct SiteContext {
     pub recent_bills: Vec<Bill>,
     /// A cooling or heating baseline model, if one has been computed.
     pub baseline: Option<BaselineModel>,
+    // --- Property operations context ---
+    /// Significant trees on the property.
+    pub trees: Vec<Tree>,
+    /// Pools on the property (first-class entities).
+    pub pools: Vec<Pool>,
+    /// Water sources available.
+    pub water_sources: Vec<WaterSource>,
+    /// Septic system, if any.
+    pub septic: Option<SepticSystem>,
+    /// Livestock flocks on the property.
+    pub flocks: Vec<Flock>,
 }
 
 // ---------------------------------------------------------------------------
@@ -49,6 +63,13 @@ pub fn generate_recommendations(ctx: &SiteContext) -> Vec<Recommendation> {
     recommend_hpwh(ctx, &mut recs);
     recommend_smart_thermostat(ctx, &mut recs);
     recommend_led_lighting(ctx, &mut recs);
+    // Property operations recommendations
+    recommend_pool_cover(ctx, &mut recs);
+    recommend_rainwater_capture(ctx, &mut recs);
+    recommend_tree_shade(ctx, &mut recs);
+    recommend_septic_maintenance(ctx, &mut recs);
+    recommend_chicken_efficiency(ctx, &mut recs);
+    recommend_garden_drip(ctx, &mut recs);
 
     rank_recommendations(&mut recs);
     recs
@@ -276,6 +297,220 @@ fn recommend_led_lighting(ctx: &SiteContext, recs: &mut Vec<Recommendation>) {
 }
 
 // ---------------------------------------------------------------------------
+// Property operations recommendation templates
+// ---------------------------------------------------------------------------
+
+/// 8. Pool cover — recommend if pool exists without a cover.
+fn recommend_pool_cover(ctx: &SiteContext, recs: &mut Vec<Recommendation>) {
+    let uncovered_pool = ctx.pools.iter().find(|p| p.cover_type.is_none());
+    let pool = match uncovered_pool {
+        Some(p) => p,
+        None => {
+            // Fall back to has_pool boolean if no Pool entity exists
+            if !ctx.has_pool {
+                return;
+            }
+            // No Pool entity but has_pool is true — still recommend
+            let mut rec = Recommendation::new(
+                ctx.site_id,
+                "Add a pool cover".to_string(),
+                "A solar or manual pool cover reduces evaporation by 50-70%, \
+                 cutting water loss, chemical consumption, and heating costs. \
+                 Typical savings: $200-500/year depending on pool size."
+                    .to_string(),
+                HypothesisCategory::WaterConservation,
+                Usd::new(350.0),
+                Usd::new(200.0),
+            );
+            rec.confidence = 0.7;
+            recs.push(rec);
+            return;
+        }
+    };
+
+    let surface = pool.surface_area_sqft.map(|s| s.value()).unwrap_or(400.0);
+    // Rule of thumb: uncovered pool loses ~0.25 inches/day in Oklahoma summer.
+    // 1 inch over 400 sqft = ~250 gallons.
+    let est_annual_savings = (surface / 400.0) * 350.0;
+
+    let mut rec = Recommendation::new(
+        ctx.site_id,
+        "Add a pool cover".to_string(),
+        format!(
+            "Pool '{}' ({:.0} gal) has no cover. A solar or manual cover \
+             reduces evaporation 50-70%, saving water, chemicals, and heat. \
+             Estimated savings: ${est_annual_savings:.0}/year.",
+            pool.name,
+            pool.volume_gallons.value()
+        ),
+        HypothesisCategory::WaterConservation,
+        Usd::new(est_annual_savings),
+        Usd::new(200.0),
+    );
+    rec.confidence = 0.7;
+    recs.push(rec);
+}
+
+/// 9. Rainwater capture — recommend if no cistern/rainwater source exists.
+fn recommend_rainwater_capture(ctx: &SiteContext, recs: &mut Vec<Recommendation>) {
+    let has_capture = ctx.water_sources.iter().any(|ws| {
+        matches!(
+            ws.kind,
+            lothal_core::ontology::water::WaterSourceKind::Cistern
+                | lothal_core::ontology::water::WaterSourceKind::RainwaterCollection
+        )
+    });
+    if has_capture {
+        return;
+    }
+
+    // Oklahoma averages ~36 inches of rain per year.
+    // A typical 2000 sqft roof captures: 2000 * 36 * 0.623 = ~44,856 gallons/year.
+    let roof_sqft = 2000.0; // conservative default
+    let annual_rain_in = 36.0;
+    let capturable_gallons = roof_sqft * annual_rain_in * 0.623;
+
+    let mut rec = Recommendation::new(
+        ctx.site_id,
+        "Install rainwater collection".to_string(),
+        format!(
+            "No rainwater capture detected. A ~{roof_sqft:.0} sqft roof at \
+             {annual_rain_in:.0}\"/year could yield ~{capturable_gallons:.0} gallons \
+             annually. A 500-gallon rain barrel system ($200-400) offsets \
+             irrigation and chicken water needs."
+        ),
+        HypothesisCategory::WaterConservation,
+        Usd::new(150.0), // conservative: partial offset of irrigation
+        Usd::new(300.0),
+    );
+    rec.confidence = 0.5;
+    rec.data_requirements = Some("Actual roof area and municipal water cost needed for precise ROI".to_string());
+    recs.push(rec);
+}
+
+/// 10. Tree shade — recommend planting if south/west walls lack coverage.
+fn recommend_tree_shade(ctx: &SiteContext, recs: &mut Vec<Recommendation>) {
+    // Only recommend if we have tree data and see a gap
+    let has_sw_shade = ctx.trees.iter().any(|t| {
+        t.shade_direction
+            .as_ref()
+            .map(|d| {
+                let d = d.to_uppercase();
+                d.contains('S') || d.contains('W')
+            })
+            .unwrap_or(false)
+    });
+    if has_sw_shade {
+        return;
+    }
+
+    let mut rec = Recommendation::new(
+        ctx.site_id,
+        "Plant shade tree on south/west exposure".to_string(),
+        "No shade tree detected on the south or west side of the property. \
+         A well-placed deciduous tree can reduce cooling costs by 15-35% \
+         by shading walls and roof during summer while allowing winter sun. \
+         Savings compound as the tree matures."
+            .to_string(),
+        HypothesisCategory::LandManagement,
+        Usd::new(200.0), // conservative: grows over years
+        Usd::new(150.0), // tree + planting
+    );
+    rec.confidence = 0.5;
+    recs.push(rec);
+}
+
+/// 11. Septic maintenance — recommend proactive scheduling if overdue.
+fn recommend_septic_maintenance(ctx: &SiteContext, recs: &mut Vec<Recommendation>) {
+    let septic = match &ctx.septic {
+        Some(s) => s,
+        None => return,
+    };
+
+    let days = match septic.days_until_pump() {
+        Some(d) => d,
+        None => return, // not enough data
+    };
+
+    if days > 180 {
+        return; // more than 6 months out, not urgent
+    }
+
+    let urgency = if days < 0 { "overdue" } else { "approaching" };
+
+    let mut rec = Recommendation::new(
+        ctx.site_id,
+        "Schedule septic pump-out".to_string(),
+        format!(
+            "Septic pump-out is {urgency} ({} days). Regular pumping ($300-500) \
+             prevents leach field failure ($10,000+). Consider spacing heavy \
+             water use days to reduce daily load.",
+            days.abs()
+        ),
+        HypothesisCategory::Maintenance,
+        Usd::new(0.0),   // preventive, not savings per se
+        Usd::new(400.0),
+    );
+    rec.confidence = 0.8;
+    recs.push(rec);
+}
+
+/// 12. Chicken coop efficiency — recommend if flock exists.
+fn recommend_chicken_efficiency(ctx: &SiteContext, recs: &mut Vec<Recommendation>) {
+    if ctx.flocks.is_empty() {
+        return;
+    }
+
+    let has_auto_door = has_device_kind(&ctx.devices, DeviceKind::CoopDoor);
+    if has_auto_door {
+        return;
+    }
+
+    let mut rec = Recommendation::new(
+        ctx.site_id,
+        "Install automatic coop door".to_string(),
+        "An automatic coop door ($100-200) opens at dawn and closes at dusk, \
+         reducing predator risk and eliminating a daily chore. Solar-powered \
+         models need no wiring. Pairs well with a coop camera for remote \
+         monitoring."
+            .to_string(),
+        HypothesisCategory::LivestockOptimization,
+        Usd::new(50.0),  // predator loss prevention + time value
+        Usd::new(150.0),
+    );
+    rec.confidence = 0.7;
+    recs.push(rec);
+}
+
+/// 13. Garden drip irrigation — recommend if no irrigation controller.
+fn recommend_garden_drip(ctx: &SiteContext, recs: &mut Vec<Recommendation>) {
+    let has_irrigation = has_device_kind(&ctx.devices, DeviceKind::IrrigationController);
+    if has_irrigation {
+        return;
+    }
+
+    // Only recommend if there's some indication of gardening
+    let has_sprinkler = has_device_kind(&ctx.devices, DeviceKind::Sprinkler);
+    if !has_sprinkler {
+        return;
+    }
+
+    let mut rec = Recommendation::new(
+        ctx.site_id,
+        "Switch to drip irrigation with smart controller".to_string(),
+        "Drip irrigation uses 30-50% less water than sprinklers by \
+         delivering water directly to root zones. A smart controller ($50-150) \
+         adjusts watering based on weather, reducing waste further."
+            .to_string(),
+        HypothesisCategory::WaterConservation,
+        Usd::new(100.0),
+        Usd::new(200.0),
+    );
+    rec.confidence = 0.6;
+    recs.push(rec);
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -316,6 +551,11 @@ mod tests {
             devices: Vec::new(),
             recent_bills: Vec::new(),
             baseline: None,
+            trees: Vec::new(),
+            pools: Vec::new(),
+            water_sources: Vec::new(),
+            septic: None,
+            flocks: Vec::new(),
         }
     }
 

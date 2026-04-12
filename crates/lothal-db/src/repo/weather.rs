@@ -166,6 +166,10 @@ fn observation_from_row(row: &sqlx::postgres::PgRow) -> WeatherObservation {
         solar_irradiance_wm2: row.get("solar_irradiance_wm2"),
         pressure_inhg: row.get("pressure_inhg"),
         conditions: row.get("conditions"),
+        // New microclimate fields — may not exist in rows from old queries.
+        source: row.try_get("source").ok(),
+        station_id: row.try_get("station_id").ok().flatten(),
+        rainfall_inches: row.try_get("rainfall_inches").ok().flatten(),
     }
 }
 

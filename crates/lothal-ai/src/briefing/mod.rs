@@ -37,16 +37,19 @@ pub async fn generate_briefing(
 }
 
 const BRIEFING_SYSTEM_PROMPT: &str = "\
-You are a home energy analyst. Given structured data about yesterday's energy, \
-water, and gas usage, produce a concise daily briefing in 3-5 sentences.
+You are a property operations analyst. Given structured data about yesterday's \
+energy, water, pool, livestock, garden, and weather, produce a concise daily \
+briefing in 5-8 sentences covering multi-system status.
 
 Rules:
 - Lead with the headline number: total kWh and cost.
 - Compare to the weather-normalized baseline if available.
 - Explain any anomalies (high circuit runtime, unusual patterns).
+- Include property operations: pool status, egg collection, septic alerts.
 - Mention upcoming maintenance if due within 7 days.
 - Be specific with numbers. No vague language.
-- End with one actionable suggestion if applicable.";
+- End with one actionable cross-system suggestion if applicable.
+- If livestock or garden data is present, include a one-liner on each.";
 
 fn build_briefing_prompt(ctx: &BriefingContext) -> String {
     let mut sections = Vec::new();
@@ -112,6 +115,36 @@ fn build_briefing_prompt(ctx: &BriefingContext) -> String {
             .map(|e| e.title.clone())
             .collect();
         sections.push(format!("Active experiments: {}", exps.join(", ")));
+    }
+
+    // Property operations context
+    if let Some(ref pool_status) = ctx.pool_status {
+        let runtime = pool_status
+            .pump_runtime_hours
+            .map(|h| format!(", pump ran {h:.1}h"))
+            .unwrap_or_default();
+        sections.push(format!("Pool '{}'{runtime}", pool_status.pool_name));
+    }
+
+    if let Some(ref livestock) = ctx.livestock_summary {
+        let mortality_note = if livestock.mortality > 0 {
+            format!(", {} mortality", livestock.mortality)
+        } else {
+            String::new()
+        };
+        sections.push(format!(
+            "Livestock '{}': {:.0} eggs, {:.1} lbs feed{mortality_note}",
+            livestock.flock_name, livestock.eggs, livestock.feed_lbs
+        ));
+    }
+
+    if let Some(ref septic) = ctx.septic_alert {
+        let status = if septic.is_overdue {
+            format!("OVERDUE by {} days", septic.days_until_pump.abs())
+        } else {
+            format!("due in {} days", septic.days_until_pump)
+        };
+        sections.push(format!("Septic pump-out: {status}"));
     }
 
     sections.join("\n")

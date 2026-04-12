@@ -123,6 +123,9 @@ fn reading_from_row(row: &sqlx::postgres::PgRow) -> Reading {
         "circuit" => ReadingSource::Circuit(source_id),
         "zone" => ReadingSource::Zone(source_id),
         "meter" => ReadingSource::Meter(source_id),
+        "property_zone" => ReadingSource::PropertyZone(source_id),
+        "pool" => ReadingSource::Pool(source_id),
+        "weather_station" => ReadingSource::WeatherStation(source_id),
         _ => ReadingSource::Device(source_id), // fallback
     };
 

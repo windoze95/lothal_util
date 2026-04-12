@@ -82,6 +82,32 @@ pub enum Scenario {
         /// Fraction of peak load to move off-peak (0.0 - 1.0).
         shift_pct: f64,
     },
+    // --- Property operations scenarios ---
+    /// Model the ROI of installing a rainwater cistern.
+    CisternInstall {
+        roof_sqft: f64,
+        annual_rainfall_inches: f64,
+        municipal_cost_per_gallon: f64,
+        cistern_cost: f64,
+    },
+    /// Model the savings from adding a pool cover.
+    PoolCoverInstall {
+        pool_surface_sqft: f64,
+        daily_evaporation_gallons: f64,
+        cover_cost: f64,
+    },
+    /// Model the HVAC impact of removing a shade tree.
+    TreeRemoval {
+        estimated_cooling_value_usd: f64,
+        removal_cost: f64,
+    },
+    /// Model the economics of expanding a flock.
+    FlockExpansion {
+        current_birds: i32,
+        additional_birds: i32,
+        feed_cost_per_bird_monthly: f64,
+        egg_value_per_bird_monthly: f64,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -135,6 +161,36 @@ pub fn simulate(scenario: &Scenario, rate_per_kwh: f64) -> Result<SimulationResu
             peak_rate,
             shift_pct,
         } => simulate_load_shift(*peak_usage_kwh, *off_peak_rate, *peak_rate, *shift_pct),
+
+        Scenario::CisternInstall {
+            roof_sqft,
+            annual_rainfall_inches,
+            municipal_cost_per_gallon,
+            cistern_cost,
+        } => simulate_cistern(*roof_sqft, *annual_rainfall_inches, *municipal_cost_per_gallon, *cistern_cost),
+
+        Scenario::PoolCoverInstall {
+            pool_surface_sqft,
+            daily_evaporation_gallons,
+            cover_cost,
+        } => simulate_pool_cover(*pool_surface_sqft, *daily_evaporation_gallons, *cover_cost),
+
+        Scenario::TreeRemoval {
+            estimated_cooling_value_usd,
+            removal_cost,
+        } => simulate_tree_removal(*estimated_cooling_value_usd, *removal_cost),
+
+        Scenario::FlockExpansion {
+            current_birds,
+            additional_birds,
+            feed_cost_per_bird_monthly,
+            egg_value_per_bird_monthly,
+        } => simulate_flock_expansion(
+            *current_birds,
+            *additional_birds,
+            *feed_cost_per_bird_monthly,
+            *egg_value_per_bird_monthly,
+        ),
     }
 }
 
@@ -453,6 +509,136 @@ pub fn simulate_insulation_upgrade(
 }
 
 // ---------------------------------------------------------------------------
+// Property operations simulations
+// ---------------------------------------------------------------------------
+
+fn simulate_cistern(
+    roof_sqft: f64,
+    annual_rainfall_inches: f64,
+    municipal_cost_per_gallon: f64,
+    cistern_cost: f64,
+) -> Result<SimulationResult, EngineError> {
+    // 1 inch of rain on 1 sqft = 0.623 gallons
+    let capturable_gallons = roof_sqft * annual_rainfall_inches * 0.623;
+    // Assume 80% capture efficiency
+    let captured = capturable_gallons * 0.80;
+    let annual_savings = captured * municipal_cost_per_gallon;
+    let payback = if annual_savings > 0.0 {
+        cistern_cost / annual_savings
+    } else {
+        f64::INFINITY
+    };
+
+    Ok(SimulationResult {
+        scenario_description: format!(
+            "Install rainwater cistern ({roof_sqft:.0} sqft roof, {annual_rainfall_inches:.0}\"/yr)"
+        ),
+        current_annual_cost: Usd::new(capturable_gallons * municipal_cost_per_gallon),
+        projected_annual_cost: Usd::new((capturable_gallons - captured) * municipal_cost_per_gallon),
+        annual_savings: Usd::new(annual_savings),
+        capex: Usd::new(cistern_cost),
+        simple_payback_years: payback,
+        notes: vec![
+            format!("Capturable rainfall: {capturable_gallons:.0} gal/year"),
+            format!("Captured at 80% efficiency: {captured:.0} gal/year"),
+        ],
+    })
+}
+
+fn simulate_pool_cover(
+    pool_surface_sqft: f64,
+    daily_evaporation_gallons: f64,
+    cover_cost: f64,
+) -> Result<SimulationResult, EngineError> {
+    // A pool cover reduces evaporation by ~60% and chemical use proportionally.
+    let annual_evaporation = daily_evaporation_gallons * 365.0;
+    let saved_gallons = annual_evaporation * 0.60;
+    // Water cost savings + chemical savings (~$0.005/gallon effective)
+    let savings = saved_gallons * 0.005;
+    let payback = if savings > 0.0 {
+        cover_cost / savings
+    } else {
+        f64::INFINITY
+    };
+
+    Ok(SimulationResult {
+        scenario_description: format!(
+            "Install pool cover ({pool_surface_sqft:.0} sqft surface)"
+        ),
+        current_annual_cost: Usd::new(annual_evaporation * 0.005),
+        projected_annual_cost: Usd::new((annual_evaporation - saved_gallons) * 0.005),
+        annual_savings: Usd::new(savings),
+        capex: Usd::new(cover_cost),
+        simple_payback_years: payback,
+        notes: vec![
+            format!("Current annual evaporation: {annual_evaporation:.0} gallons"),
+            format!("Saved with cover (60% reduction): {saved_gallons:.0} gallons"),
+        ],
+    })
+}
+
+fn simulate_tree_removal(
+    estimated_cooling_value_usd: f64,
+    removal_cost: f64,
+) -> Result<SimulationResult, EngineError> {
+    // Removing a tree *increases* cooling costs.
+    Ok(SimulationResult {
+        scenario_description: "Remove shade tree".to_string(),
+        current_annual_cost: Usd::zero(),
+        projected_annual_cost: Usd::new(estimated_cooling_value_usd),
+        annual_savings: Usd::new(-estimated_cooling_value_usd), // negative = cost increase
+        capex: Usd::new(removal_cost),
+        simple_payback_years: f64::INFINITY, // never pays back
+        notes: vec![
+            format!("Estimated annual cooling value lost: ${estimated_cooling_value_usd:.0}"),
+            format!("Removal cost: ${removal_cost:.0}"),
+            "Consider the tree's shade value before removing.".to_string(),
+        ],
+    })
+}
+
+fn simulate_flock_expansion(
+    current_birds: i32,
+    additional_birds: i32,
+    feed_cost_per_bird_monthly: f64,
+    egg_value_per_bird_monthly: f64,
+) -> Result<SimulationResult, EngineError> {
+    let total = current_birds + additional_birds;
+    let current_annual_cost = current_birds as f64 * feed_cost_per_bird_monthly * 12.0;
+    let new_annual_cost = total as f64 * feed_cost_per_bird_monthly * 12.0;
+    let new_annual_revenue = total as f64 * egg_value_per_bird_monthly * 12.0;
+    let current_annual_revenue = current_birds as f64 * egg_value_per_bird_monthly * 12.0;
+
+    let incremental_cost = new_annual_cost - current_annual_cost;
+    let incremental_revenue = new_annual_revenue - current_annual_revenue;
+    let net_savings = incremental_revenue - incremental_cost;
+
+    // Capex: ~$30-50 per bird for coop expansion, feeder, waterer
+    let capex = additional_birds as f64 * 40.0;
+    let payback = if net_savings > 0.0 {
+        capex / net_savings
+    } else {
+        f64::INFINITY
+    };
+
+    Ok(SimulationResult {
+        scenario_description: format!(
+            "Expand flock from {current_birds} to {total} birds"
+        ),
+        current_annual_cost: Usd::new(current_annual_cost - current_annual_revenue),
+        projected_annual_cost: Usd::new(new_annual_cost - new_annual_revenue),
+        annual_savings: Usd::new(net_savings),
+        capex: Usd::new(capex),
+        simple_payback_years: payback,
+        notes: vec![
+            format!("Additional feed cost: ${incremental_cost:.0}/year"),
+            format!("Additional egg value: ${incremental_revenue:.0}/year"),
+            format!("Net annual benefit: ${net_savings:.0}"),
+        ],
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -570,6 +756,66 @@ mod tests {
         assert!(result.annual_savings.value() > 0.0);
         assert!(result.capex.value() > 0.0);
         assert!(result.simple_payback_years > 0.0);
+    }
+
+    #[test]
+    fn test_cistern_install() {
+        let result = simulate(
+            &Scenario::CisternInstall {
+                roof_sqft: 2000.0,
+                annual_rainfall_inches: 36.0,
+                municipal_cost_per_gallon: 0.005,
+                cistern_cost: 500.0,
+            },
+            0.11,
+        )
+        .unwrap();
+        assert!(result.annual_savings.value() > 0.0);
+        assert_eq!(result.capex.value(), 500.0);
+    }
+
+    #[test]
+    fn test_pool_cover_install() {
+        let result = simulate(
+            &Scenario::PoolCoverInstall {
+                pool_surface_sqft: 400.0,
+                daily_evaporation_gallons: 50.0,
+                cover_cost: 200.0,
+            },
+            0.11,
+        )
+        .unwrap();
+        assert!(result.annual_savings.value() > 0.0);
+    }
+
+    #[test]
+    fn test_tree_removal_shows_cost() {
+        let result = simulate(
+            &Scenario::TreeRemoval {
+                estimated_cooling_value_usd: 200.0,
+                removal_cost: 1500.0,
+            },
+            0.11,
+        )
+        .unwrap();
+        // Removing a shade tree should show NEGATIVE savings (cost increase)
+        assert!(result.annual_savings.value() < 0.0);
+    }
+
+    #[test]
+    fn test_flock_expansion() {
+        let result = simulate(
+            &Scenario::FlockExpansion {
+                current_birds: 6,
+                additional_birds: 6,
+                feed_cost_per_bird_monthly: 5.0,
+                egg_value_per_bird_monthly: 8.0,
+            },
+            0.11,
+        )
+        .unwrap();
+        // Net positive: eggs worth more than feed
+        assert!(result.annual_savings.value() > 0.0);
     }
 
     #[test]

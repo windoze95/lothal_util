@@ -71,8 +71,10 @@ pub enum DeviceKind {
     WellPump,
     // Pool
     PoolPump,
+    PoolPumpVS,
     PoolHeater,
     PoolCleaner,
+    PoolCover,
     // Kitchen
     Refrigerator,
     Freezer,
@@ -97,10 +99,19 @@ pub enum DeviceKind {
     Server,
     NetworkSwitch,
     UPS,
+    // Livestock
+    CoopDoor,
+    CoopHeater,
+    CoopLight,
+    WatererHeater,
     // Outdoor
     Sprinkler,
+    IrrigationController,
     OutdoorLighting,
     EvCharger,
+    WeatherStation,
+    RainGauge,
+    SoilSensor,
     // Catch-all
     Other,
 }

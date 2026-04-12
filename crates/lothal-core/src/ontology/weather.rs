@@ -14,6 +14,12 @@ pub struct WeatherObservation {
     pub solar_irradiance_wm2: Option<f64>,
     pub pressure_inhg: Option<f64>,
     pub conditions: Option<String>,
+    /// "nws" for National Weather Service, "on_property" for local station.
+    pub source: Option<String>,
+    /// Device UUID if this is from an on-property weather station.
+    pub station_id: Option<Uuid>,
+    /// Rainfall in inches for this observation period.
+    pub rainfall_inches: Option<f64>,
 }
 
 impl WeatherObservation {
@@ -28,6 +34,9 @@ impl WeatherObservation {
             solar_irradiance_wm2: None,
             pressure_inhg: None,
             conditions: None,
+            source: None,
+            station_id: None,
+            rainfall_inches: None,
         }
     }
 }
@@ -44,6 +53,7 @@ pub struct DailyWeatherSummary {
     pub total_solar_wh_m2: Option<f64>,
     pub cooling_degree_days: f64,
     pub heating_degree_days: f64,
+    pub total_rainfall_inches: Option<f64>,
 }
 
 impl DailyWeatherSummary {
@@ -81,6 +91,18 @@ impl DailyWeatherSummary {
         let cdd = (avg_temp - base_temp_f).max(0.0);
         let hdd = (base_temp_f - avg_temp).max(0.0);
 
+        let total_rainfall: Option<f64> = {
+            let r: Vec<f64> = observations
+                .iter()
+                .filter_map(|o| o.rainfall_inches)
+                .collect();
+            if r.is_empty() {
+                None
+            } else {
+                Some(r.iter().sum())
+            }
+        };
+
         Some(Self {
             date,
             site_id,
@@ -91,6 +113,7 @@ impl DailyWeatherSummary {
             total_solar_wh_m2: None,
             cooling_degree_days: cdd,
             heating_degree_days: hdd,
+            total_rainfall_inches: total_rainfall,
         })
     }
 }

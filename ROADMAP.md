@@ -1,10 +1,17 @@
 # lothal_util Roadmap
 
-## What Exists (v0.1 — CLI Foundation)
+## What Exists (v0.2 — Property Operations)
 
-6-crate Rust workspace: lothal-core (ontology types), lothal-db (sqlx/TimescaleDB), lothal-ingest (bill parsers, MQTT, NWS, Flume, Ecobee), lothal-engine (baselines, simulation, recommendations, experiments), lothal-ai (LLM bill parsing, daily briefings, MCP reasoning agent, NILM), lothal-cli (full interactive CLI). ~19k lines, 105 tests, zero warnings.
+6-crate Rust workspace expanded from "home efficiency" to full **property operations ontology**. The house is one subsystem; the lot, pool, water cycle, chickens, garden, compost, and weather are the rest. All joined in one schema so cross-system questions are answerable.
 
-The ontology and data pipes work on their own. A clean Postgres schema with bills, readings, and weather is already more than most homeowners have. AI is a consumer of this ontology, not the load-bearing element.
+- lothal-core: 16 ontology modules, 20+ entity types, 50+ enum types, 12 strongly-typed units
+- lothal-db: 10 PostgreSQL/TimescaleDB migrations, 13 repository modules
+- lothal-ingest: bill parsers (OG&E, ONG, Guthrie), MQTT, NWS, Flume, Ecobee
+- lothal-engine: energy + water baselines, 8 simulation scenarios, 13 recommendation templates, experiment evaluator
+- lothal-ai: LLM bill parsing, property operations daily briefings, MCP reasoning agent (14 tools), NILM
+- lothal-cli: 17 command groups, 55+ subcommands
+
+~22k lines, 138 tests, zero new warnings. AI is a consumer of the ontology, not the load-bearing element.
 
 ---
 
@@ -96,6 +103,31 @@ Emporia gives per-circuit watts but doesn't know what's running. Classical signa
 - **Anomaly detection** — `kWh > 1.5 * 30d_avg AND temp < 95F` is a SQL query. Write the rule.
 - **Bill math** — LLM extracts, code validates. Models confidently round things.
 - **Forecasting** — Prophet/ARIMA/seasonal-naive beats an LLM on time-series and costs nothing.
+
+---
+
+## Phase 2.5: Property Operations Expansion -- IMPLEMENTED
+
+Expanded the ontology from "home efficiency" to "property operations". Six new migrations, six new core entity modules, five new repo modules, four new CLI command groups, expanded engine/AI/MCP.
+
+### New Subsystems
+- **Property spatial model** — PropertyZone (13 kinds), Constraint (7 kinds), Tree with shade/cooling analysis
+- **Water systems** — WaterSource (municipal, well, cistern, rainwater), Pool (first-class entity with pump/heater/cover), SepticSystem (pump scheduling, lifespan tracking), WaterFlow (directed connections)
+- **Livestock** — Flock, Paddock (rotational grazing), LivestockLog (daily events: eggs, feed, water, manure, predator incidents)
+- **Garden & compost** — GardenBed (5 types), Planting (crop tracking with yield), CompostPile (volume tracking)
+- **Resource flows** — Cross-system flow graph (FlowEndpoint: 10 polymorphic variants) tracking water, energy, biomass, nutrients between any entities
+- **Microclimate** — On-property weather station support, rainfall tracking
+
+### Cross-System Integration
+- ReadingKind expanded with 11 new variants (soil, pool chemistry, livestock, compost)
+- DeviceKind expanded with 10 new variants (coop, irrigation, weather sensors)
+- MaintenanceTarget/Type expanded for property operations
+- HypothesisCategory expanded: WaterConservation, LivestockOptimization, LandManagement
+- 6 new recommendation templates: pool cover, rainwater capture, tree shade, septic, coop efficiency, garden drip
+- 4 new simulation scenarios: cistern install, pool cover, tree removal, flock expansion
+- Water baseline regression (usage vs temperature)
+- Briefing context includes pool, livestock, septic alerts
+- MCP tools: get_property_zones, get_pool_status, query_livestock_logs, get_property_overview
 
 ---
 

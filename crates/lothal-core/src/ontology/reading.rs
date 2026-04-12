@@ -42,6 +42,9 @@ pub enum ReadingSource {
     Circuit(Uuid),
     Zone(Uuid),
     Meter(Uuid),
+    PropertyZone(Uuid),
+    Pool(Uuid),
+    WeatherStation(Uuid),
 }
 
 impl ReadingSource {
@@ -51,12 +54,21 @@ impl ReadingSource {
             Self::Circuit(_) => "circuit",
             Self::Zone(_) => "zone",
             Self::Meter(_) => "meter",
+            Self::PropertyZone(_) => "property_zone",
+            Self::Pool(_) => "pool",
+            Self::WeatherStation(_) => "weather_station",
         }
     }
 
     pub fn source_id(&self) -> Uuid {
         match self {
-            Self::Device(id) | Self::Circuit(id) | Self::Zone(id) | Self::Meter(id) => *id,
+            Self::Device(id)
+            | Self::Circuit(id)
+            | Self::Zone(id)
+            | Self::Meter(id)
+            | Self::PropertyZone(id)
+            | Self::Pool(id)
+            | Self::WeatherStation(id) => *id,
         }
     }
 }
@@ -83,6 +95,33 @@ pub enum ReadingKind {
     SolarIrradiance,
     /// Water flow rate in GPM
     WaterFlowGpm,
+    // Soil
+    /// Soil moisture as a percentage
+    SoilMoisturePct,
+    /// Soil temperature in Fahrenheit
+    SoilTemperatureF,
+    // Weather
+    /// Rainfall in inches
+    RainfallInches,
+    /// UV index
+    UvIndex,
+    // Pool
+    /// Pool chlorine in parts per million
+    PoolChlorinePpm,
+    /// Pool pH level
+    PoolPhLevel,
+    /// Pool water temperature in Fahrenheit
+    PoolTemperatureF,
+    /// Pool evaporation in gallons
+    EvaporationGallons,
+    // Livestock
+    /// Feed consumed in pounds
+    FeedLbs,
+    /// Number of eggs collected
+    EggCount,
+    // Compost
+    /// Compost pile temperature in Fahrenheit
+    CompostTemperatureF,
 }
 
 impl std::fmt::Display for ReadingKind {
@@ -97,6 +136,17 @@ impl std::fmt::Display for ReadingKind {
             Self::RuntimeMinutes => write!(f, "min"),
             Self::SolarIrradiance => write!(f, "W/m²"),
             Self::WaterFlowGpm => write!(f, "GPM"),
+            Self::SoilMoisturePct => write!(f, "%SM"),
+            Self::SoilTemperatureF => write!(f, "°F soil"),
+            Self::RainfallInches => write!(f, "in"),
+            Self::UvIndex => write!(f, "UV"),
+            Self::PoolChlorinePpm => write!(f, "ppm Cl"),
+            Self::PoolPhLevel => write!(f, "pH"),
+            Self::PoolTemperatureF => write!(f, "°F pool"),
+            Self::EvaporationGallons => write!(f, "gal evap"),
+            Self::FeedLbs => write!(f, "lbs feed"),
+            Self::EggCount => write!(f, "eggs"),
+            Self::CompostTemperatureF => write!(f, "°F compost"),
         }
     }
 }
@@ -113,6 +163,17 @@ impl ReadingKind {
             Self::RuntimeMinutes => "runtime_minutes",
             Self::SolarIrradiance => "solar_irradiance",
             Self::WaterFlowGpm => "water_flow_gpm",
+            Self::SoilMoisturePct => "soil_moisture_pct",
+            Self::SoilTemperatureF => "soil_temperature_f",
+            Self::RainfallInches => "rainfall_inches",
+            Self::UvIndex => "uv_index",
+            Self::PoolChlorinePpm => "pool_chlorine_ppm",
+            Self::PoolPhLevel => "pool_ph_level",
+            Self::PoolTemperatureF => "pool_temperature_f",
+            Self::EvaporationGallons => "evaporation_gallons",
+            Self::FeedLbs => "feed_lbs",
+            Self::EggCount => "egg_count",
+            Self::CompostTemperatureF => "compost_temperature_f",
         }
     }
 }
@@ -130,6 +191,17 @@ impl std::str::FromStr for ReadingKind {
             "runtime_minutes" => Ok(Self::RuntimeMinutes),
             "solar_irradiance" => Ok(Self::SolarIrradiance),
             "water_flow_gpm" => Ok(Self::WaterFlowGpm),
+            "soil_moisture_pct" => Ok(Self::SoilMoisturePct),
+            "soil_temperature_f" => Ok(Self::SoilTemperatureF),
+            "rainfall_inches" => Ok(Self::RainfallInches),
+            "uv_index" => Ok(Self::UvIndex),
+            "pool_chlorine_ppm" => Ok(Self::PoolChlorinePpm),
+            "pool_ph_level" => Ok(Self::PoolPhLevel),
+            "pool_temperature_f" => Ok(Self::PoolTemperatureF),
+            "evaporation_gallons" => Ok(Self::EvaporationGallons),
+            "feed_lbs" => Ok(Self::FeedLbs),
+            "egg_count" => Ok(Self::EggCount),
+            "compost_temperature_f" => Ok(Self::CompostTemperatureF),
             other => Err(format!("unknown reading kind: {other}")),
         }
     }

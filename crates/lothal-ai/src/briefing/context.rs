@@ -17,6 +17,10 @@ pub struct BriefingContext {
     pub circuit_anomalies: Vec<CircuitAnomaly>,
     pub maintenance_due: Vec<MaintenanceDue>,
     pub active_experiments: Vec<ActiveExperiment>,
+    // --- Property operations context ---
+    pub pool_status: Option<PoolDayStatus>,
+    pub livestock_summary: Option<LivestockDaySummary>,
+    pub septic_alert: Option<SepticAlert>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -53,6 +57,26 @@ pub struct ActiveExperiment {
     pub title: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct PoolDayStatus {
+    pub pool_name: String,
+    pub pump_runtime_hours: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LivestockDaySummary {
+    pub flock_name: String,
+    pub eggs: f64,
+    pub feed_lbs: f64,
+    pub mortality: i32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SepticAlert {
+    pub days_until_pump: i64,
+    pub is_overdue: bool,
+}
+
 /// Gather all context data for a daily briefing from the database.
 pub async fn gather_context(
     pool: &PgPool,
@@ -66,6 +90,14 @@ pub async fn gather_context(
         fetch_maintenance_due(pool, site_id, date),
         fetch_active_experiments(pool, site_id),
     )?;
+
+    // Property operations context — fetched in parallel, errors swallowed to
+    // not block the briefing if property data isn't set up yet.
+    let (pool_status, livestock_summary, septic_alert) = tokio::join!(
+        fetch_pool_status(pool, site_id),
+        fetch_livestock_summary(pool, site_id, date),
+        fetch_septic_alert(pool, site_id),
+    );
 
     // Compute baseline comparison if we have weather and usage data.
     let baseline_comparison = match (&weather, total_kwh) {
@@ -88,6 +120,9 @@ pub async fn gather_context(
         circuit_anomalies,
         maintenance_due,
         active_experiments,
+        pool_status: pool_status.ok().flatten(),
+        livestock_summary: livestock_summary.ok().flatten(),
+        septic_alert: septic_alert.ok().flatten(),
     })
 }
 
@@ -345,4 +380,69 @@ async fn compute_baseline_comparison(
         actual_kwh,
         deviation_pct,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Property operations context fetchers
+// ---------------------------------------------------------------------------
+
+async fn fetch_pool_status(
+    pool: &PgPool,
+    site_id: Uuid,
+) -> Result<Option<PoolDayStatus>, sqlx::Error> {
+    let pools = lothal_db::water::list_pools_by_site(pool, site_id).await?;
+    let first = match pools.into_iter().next() {
+        Some(p) => p,
+        None => return Ok(None),
+    };
+
+    Ok(Some(PoolDayStatus {
+        pool_name: first.name,
+        pump_runtime_hours: None, // TODO: query from readings when pump_device_id is set
+    }))
+}
+
+async fn fetch_livestock_summary(
+    pool: &PgPool,
+    site_id: Uuid,
+    date: NaiveDate,
+) -> Result<Option<LivestockDaySummary>, sqlx::Error> {
+    let flocks = lothal_db::livestock::list_flocks_by_site(pool, site_id).await?;
+    let flock = match flocks.into_iter().next() {
+        Some(f) => f,
+        None => return Ok(None),
+    };
+
+    let summary = lothal_db::livestock::get_flock_daily_summary(pool, flock.id, date).await?;
+    Ok(Some(LivestockDaySummary {
+        flock_name: flock.name,
+        eggs: summary.eggs,
+        feed_lbs: summary.feed_lbs,
+        mortality: summary.mortality,
+    }))
+}
+
+async fn fetch_septic_alert(
+    pool: &PgPool,
+    site_id: Uuid,
+) -> Result<Option<SepticAlert>, sqlx::Error> {
+    let septic = match lothal_db::water::get_septic_system(pool, site_id).await? {
+        Some(s) => s,
+        None => return Ok(None),
+    };
+
+    let days = match septic.days_until_pump() {
+        Some(d) => d,
+        None => return Ok(None),
+    };
+
+    // Only alert if within 90 days or overdue
+    if days > 90 {
+        return Ok(None);
+    }
+
+    Ok(Some(SepticAlert {
+        days_until_pump: days,
+        is_overdue: days < 0,
+    }))
 }

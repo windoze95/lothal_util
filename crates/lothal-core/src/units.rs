@@ -78,6 +78,10 @@ unit_type!(Usd, "USD");
 unit_type!(DegreeDays, "°D");
 unit_type!(SquareFeet, "sqft");
 unit_type!(Acres, "acres");
+unit_type!(Pounds, "lbs");
+unit_type!(Inches, "in");
+unit_type!(Ppm, "ppm");
+unit_type!(CubicFeet, "cuft");
 
 /// Compute cooling degree days for a given day.
 /// CDD = max(0, avg_temp_f - base_temp_f)

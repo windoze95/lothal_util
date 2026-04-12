@@ -2,6 +2,7 @@ pub mod baseline;
 pub mod experiment;
 pub mod recommend;
 pub mod simulate;
+pub mod water_baseline;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {

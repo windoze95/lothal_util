@@ -133,6 +133,53 @@ pub fn tool_definitions() -> Vec<Value> {
                 }
             }
         }),
+        // --- Property operations tools ---
+        json!({
+            "name": "get_property_zones",
+            "description": "List all property zones (outdoor areas) and constraints for a site.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["site_id"],
+                "properties": {
+                    "site_id": { "type": "string", "description": "UUID of the site" }
+                }
+            }
+        }),
+        json!({
+            "name": "get_pool_status",
+            "description": "Get pool details and recent readings for a site.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["site_id"],
+                "properties": {
+                    "site_id": { "type": "string", "description": "UUID of the site" }
+                }
+            }
+        }),
+        json!({
+            "name": "query_livestock_logs",
+            "description": "Query livestock flock logs (eggs, feed, events) for a date range.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["flock_id", "start", "end"],
+                "properties": {
+                    "flock_id": { "type": "string", "description": "UUID of the flock" },
+                    "start": { "type": "string", "description": "Start date (YYYY-MM-DD)" },
+                    "end": { "type": "string", "description": "End date (YYYY-MM-DD)" }
+                }
+            }
+        }),
+        json!({
+            "name": "get_property_overview",
+            "description": "Comprehensive cross-system property status: zones, trees, water sources, pools, septic, flocks, garden beds, compost.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["site_id"],
+                "properties": {
+                    "site_id": { "type": "string", "description": "UUID of the site" }
+                }
+            }
+        }),
     ]
 }
 
@@ -153,6 +200,10 @@ pub async fn call_tool(
         "create_hypothesis" => handle_create_hypothesis(args, pool).await,
         "list_recommendations" => handle_list_recommendations(args, pool).await,
         "get_site_overview" => handle_get_site_overview(args, pool).await,
+        "get_property_zones" => handle_get_property_zones(args, pool).await,
+        "get_pool_status" => handle_get_pool_status(args, pool).await,
+        "query_livestock_logs" => handle_query_livestock_logs(args, pool).await,
+        "get_property_overview" => handle_get_property_overview(args, pool).await,
         _ => Err(AiError::Mcp(format!("Unknown tool: {name}"))),
     }
 }
@@ -474,6 +525,91 @@ fn parse_hypothesis_category(s: &str) -> lothal_core::HypothesisCategory {
         "rate" | "tariff" => lothal_core::HypothesisCategory::RateOptimization,
         "load_shifting" | "load_shift" | "tou" => lothal_core::HypothesisCategory::LoadShifting,
         "maintenance" => lothal_core::HypothesisCategory::Maintenance,
+        "water" | "water_conservation" => lothal_core::HypothesisCategory::WaterConservation,
+        "livestock" | "chicken" => lothal_core::HypothesisCategory::LivestockOptimization,
+        "land" | "land_management" | "tree" => lothal_core::HypothesisCategory::LandManagement,
         _ => lothal_core::HypothesisCategory::Other,
     }
+}
+
+// ---------------------------------------------------------------------------
+// Property operations handlers
+// ---------------------------------------------------------------------------
+
+async fn handle_get_property_zones(
+    args: Value,
+    pool: &PgPool,
+) -> Result<Value, AiError> {
+    let site_id = parse_required_uuid(&args, "site_id")?;
+    let zones = lothal_db::property_zone::list_property_zones_by_site(pool, site_id).await?;
+    let constraints = lothal_db::property_zone::list_constraints_by_site(pool, site_id).await?;
+    let trees = lothal_db::property_zone::list_trees_by_site(pool, site_id).await?;
+
+    Ok(json!({
+        "zones": zones,
+        "constraints": constraints,
+        "trees": trees,
+    }))
+}
+
+async fn handle_get_pool_status(
+    args: Value,
+    pool: &PgPool,
+) -> Result<Value, AiError> {
+    let site_id = parse_required_uuid(&args, "site_id")?;
+    let pools = lothal_db::water::list_pools_by_site(pool, site_id).await?;
+
+    Ok(json!({ "pools": pools }))
+}
+
+async fn handle_query_livestock_logs(
+    args: Value,
+    pool: &PgPool,
+) -> Result<Value, AiError> {
+    let flock_id = parse_required_uuid(&args, "flock_id")?;
+    let start = args
+        .get("start")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<NaiveDate>().ok())
+        .ok_or_else(|| AiError::Validation("Missing or invalid start date".into()))?;
+    let end = args
+        .get("end")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<NaiveDate>().ok())
+        .ok_or_else(|| AiError::Validation("Missing or invalid end date".into()))?;
+
+    let logs = lothal_db::livestock::list_logs_by_date_range(pool, flock_id, start, end).await?;
+
+    Ok(json!({ "logs": logs }))
+}
+
+async fn handle_get_property_overview(
+    args: Value,
+    pool: &PgPool,
+) -> Result<Value, AiError> {
+    let site_id = parse_required_uuid(&args, "site_id")?;
+
+    let (zones, constraints, trees, water_sources, pools, septic, flocks, beds, compost) = tokio::try_join!(
+        async { lothal_db::property_zone::list_property_zones_by_site(pool, site_id).await },
+        async { lothal_db::property_zone::list_constraints_by_site(pool, site_id).await },
+        async { lothal_db::property_zone::list_trees_by_site(pool, site_id).await },
+        async { lothal_db::water::list_water_sources_by_site(pool, site_id).await },
+        async { lothal_db::water::list_pools_by_site(pool, site_id).await },
+        async { lothal_db::water::get_septic_system(pool, site_id).await },
+        async { lothal_db::livestock::list_flocks_by_site(pool, site_id).await },
+        async { lothal_db::garden::list_garden_beds_by_site(pool, site_id).await },
+        async { lothal_db::garden::list_compost_piles_by_site(pool, site_id).await },
+    )?;
+
+    Ok(json!({
+        "property_zones": zones,
+        "constraints": constraints,
+        "trees": trees,
+        "water_sources": water_sources,
+        "pools": pools,
+        "septic_system": septic,
+        "flocks": flocks,
+        "garden_beds": beds,
+        "compost_piles": compost,
+    }))
 }

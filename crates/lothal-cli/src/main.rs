@@ -65,6 +65,26 @@ enum Commands {
         #[command(subcommand)]
         command: AiCommands,
     },
+    /// Manage property zones, constraints, and trees
+    Property {
+        #[command(subcommand)]
+        command: PropertyCommands,
+    },
+    /// Manage water sources, pools, and septic
+    Water {
+        #[command(subcommand)]
+        command: WaterCommands,
+    },
+    /// Manage flocks, paddocks, and livestock logs
+    Livestock {
+        #[command(subcommand)]
+        command: LivestockCommands,
+    },
+    /// Manage garden beds, plantings, and compost
+    Garden {
+        #[command(subcommand)]
+        command: GardenCommands,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +292,74 @@ enum AiCommands {
 }
 
 // ---------------------------------------------------------------------------
+// Property
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand)]
+enum PropertyCommands {
+    /// List property zones, constraints, and trees
+    List,
+    /// Add a property zone
+    AddZone,
+    /// Add a tree
+    AddTree,
+    /// Add a constraint
+    AddConstraint,
+}
+
+// ---------------------------------------------------------------------------
+// Water
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand)]
+enum WaterCommands {
+    /// List water sources, pools, and septic
+    List,
+    /// Add a water source
+    AddSource,
+    /// Add a pool
+    AddPool,
+    /// Add septic system
+    AddSeptic,
+}
+
+// ---------------------------------------------------------------------------
+// Livestock
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand)]
+enum LivestockCommands {
+    /// Add a new flock
+    AddFlock,
+    /// Show flock details and paddocks
+    Show,
+    /// Log a daily event (eggs, feed, etc.)
+    Log,
+    /// List recent logs
+    ListLogs {
+        /// Time window (e.g., "7d", "30d")
+        #[arg(default_value = "7d")]
+        last: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Garden
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand)]
+enum GardenCommands {
+    /// List garden beds and compost piles
+    List,
+    /// Add a garden bed
+    AddBed,
+    /// Record a planting
+    AddPlanting,
+    /// Add a compost pile
+    AddCompost,
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -407,6 +495,36 @@ async fn main() -> anyhow::Result<()> {
             AiCommands::Identify { circuit, window } => {
                 commands::ai::identify(&pool, &circuit, &window).await?;
             }
+        },
+
+        Commands::Property { command } => match command {
+            PropertyCommands::List => commands::property::list_zones(&pool).await?,
+            PropertyCommands::AddZone => commands::property::add_zone(&pool).await?,
+            PropertyCommands::AddTree => commands::property::add_tree(&pool).await?,
+            PropertyCommands::AddConstraint => commands::property::add_constraint(&pool).await?,
+        },
+
+        Commands::Water { command } => match command {
+            WaterCommands::List => commands::water::list_sources(&pool).await?,
+            WaterCommands::AddSource => commands::water::add_source(&pool).await?,
+            WaterCommands::AddPool => commands::water::add_pool(&pool).await?,
+            WaterCommands::AddSeptic => commands::water::add_septic(&pool).await?,
+        },
+
+        Commands::Livestock { command } => match command {
+            LivestockCommands::AddFlock => commands::livestock::add_flock(&pool).await?,
+            LivestockCommands::Show => commands::livestock::show_flock(&pool).await?,
+            LivestockCommands::Log => commands::livestock::log_event(&pool).await?,
+            LivestockCommands::ListLogs { last } => {
+                commands::livestock::list_logs(&pool, &last).await?
+            }
+        },
+
+        Commands::Garden { command } => match command {
+            GardenCommands::List => commands::garden::list_beds(&pool).await?,
+            GardenCommands::AddBed => commands::garden::add_bed(&pool).await?,
+            GardenCommands::AddPlanting => commands::garden::add_planting(&pool).await?,
+            GardenCommands::AddCompost => commands::garden::add_compost_pile(&pool).await?,
         },
     }
 

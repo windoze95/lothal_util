@@ -68,6 +68,13 @@ pub async fn generate_recommendations(pool: &PgPool) -> Result<()> {
     let has_pool = structures.iter().any(|s| s.has_pool);
     let climate_zone = site.climate_zone.clone();
 
+    // Fetch property operations context for expanded recommendations.
+    let trees = lothal_db::property_zone::list_trees_by_site(pool, site.id).await?;
+    let pools = lothal_db::water::list_pools_by_site(pool, site.id).await?;
+    let water_sources = lothal_db::water::list_water_sources_by_site(pool, site.id).await?;
+    let septic = lothal_db::water::get_septic_system(pool, site.id).await?;
+    let flocks = lothal_db::livestock::list_flocks_by_site(pool, site.id).await?;
+
     let ctx = recommend::SiteContext {
         site_id: site.id,
         year_built,
@@ -76,6 +83,11 @@ pub async fn generate_recommendations(pool: &PgPool) -> Result<()> {
         devices: all_devices,
         recent_bills: bills,
         baseline: baseline_model,
+        trees,
+        pools,
+        water_sources,
+        septic,
+        flocks,
     };
 
     let mut recs = recommend::generate_recommendations(&ctx);

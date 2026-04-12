@@ -42,6 +42,9 @@ pub enum HypothesisCategory {
     RateOptimization,
     LoadShifting,
     Maintenance,
+    WaterConservation,
+    LivestockOptimization,
+    LandManagement,
     Other,
 }
 
@@ -54,6 +57,9 @@ impl std::fmt::Display for HypothesisCategory {
             Self::RateOptimization => write!(f, "Rate Optimization"),
             Self::LoadShifting => write!(f, "Load Shifting"),
             Self::Maintenance => write!(f, "Maintenance"),
+            Self::WaterConservation => write!(f, "Water Conservation"),
+            Self::LivestockOptimization => write!(f, "Livestock Optimization"),
+            Self::LandManagement => write!(f, "Land Management"),
             Self::Other => write!(f, "Other"),
         }
     }
