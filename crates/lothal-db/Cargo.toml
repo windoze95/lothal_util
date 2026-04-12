@@ -1,0 +1,17 @@
+[package]
+name = "lothal-db"
+description = "Database persistence layer for lothal home efficiency ontology"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+lothal-core = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

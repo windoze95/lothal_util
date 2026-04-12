@@ -1,0 +1,78 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/lothal-core",
+    "crates/lothal-db",
+    "crates/lothal-ingest",
+    "crates/lothal-engine",
+    "crates/lothal-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Julian"]
+
+[workspace.dependencies]
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Database
+sqlx = { version = "0.8", features = [
+    "runtime-tokio",
+    "tls-rustls",
+    "postgres",
+    "uuid",
+    "chrono",
+    "json",
+    "migrate",
+] }
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Identity
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json"] }
+
+# MQTT
+rumqttc = "0.24"
+
+# XML parsing
+quick-xml = { version = "0.37", features = ["serialize"] }
+
+# CSV
+csv = "1"
+
+# Regex
+regex = "1"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+dialoguer = "0.11"
+comfy-table = "7"
+indicatif = "0.17"
+
+# Config
+dotenvy = "0.15"
+
+# Workspace crates
+lothal-core = { path = "crates/lothal-core" }
+lothal-db = { path = "crates/lothal-db" }
+lothal-ingest = { path = "crates/lothal-ingest" }
+lothal-engine = { path = "crates/lothal-engine" }

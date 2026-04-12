@@ -1,0 +1,345 @@
+mod commands;
+
+use clap::{Parser, Subcommand};
+
+#[derive(Parser)]
+#[command(name = "lothal", about = "Home efficiency ontology system")]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Initialize a new site with guided onboarding
+    Init,
+    /// Manage sites, structures, and zones
+    Site {
+        #[command(subcommand)]
+        command: SiteCommands,
+    },
+    /// Manage devices and circuits
+    Device {
+        #[command(subcommand)]
+        command: DeviceCommands,
+    },
+    /// Manage utility bills
+    Bill {
+        #[command(subcommand)]
+        command: BillCommands,
+    },
+    /// Data ingestion commands
+    Ingest {
+        #[command(subcommand)]
+        command: IngestCommands,
+    },
+    /// Query data
+    Query {
+        #[command(subcommand)]
+        command: QueryCommands,
+    },
+    /// Compute weather-normalized baselines
+    Baseline {
+        #[command(subcommand)]
+        command: BaselineCommands,
+    },
+    /// Run "what if" simulations
+    Simulate {
+        #[command(subcommand)]
+        command: SimulateCommands,
+    },
+    /// Manage experiments
+    Experiment {
+        #[command(subcommand)]
+        command: ExperimentCommands,
+    },
+    /// Generate efficiency recommendations
+    Recommend,
+    /// Generate reports
+    Report {
+        #[command(subcommand)]
+        command: ReportCommands,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Site
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand)]
+enum SiteCommands {
+    /// Display the full site ontology tree
+    Show,
+    /// Interactively edit site properties
+    Edit,
+}
+
+// ---------------------------------------------------------------------------
+// Device
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand)]
+enum DeviceCommands {
+    /// Register a new device interactively
+    Add,
+    /// List all registered devices
+    List,
+    /// Show details for a specific device
+    Show {
+        /// Device ID (full UUID or short prefix)
+        id: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Bill
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand)]
+enum BillCommands {
+    /// Enter a bill manually
+    Add,
+    /// Import a bill from a file (PDF, CSV, XML)
+    Import {
+        /// Path to the bill file
+        path: String,
+    },
+    /// List bills for one or all accounts
+    List {
+        /// Filter by account (provider name, type, or account number)
+        account: Option<String>,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Ingest
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand)]
+enum IngestCommands {
+    /// Start MQTT listener for real-time device readings
+    Mqtt,
+    /// Fetch weather data from NWS
+    Weather {
+        /// Number of days to fetch
+        #[arg(default_value = "7")]
+        days: u32,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Query
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand)]
+enum QueryCommands {
+    /// Query device readings
+    Readings {
+        /// Device name or ID
+        device: String,
+        /// Time window (e.g., "24h", "7d", "30d")
+        #[arg(default_value = "24h")]
+        last: String,
+    },
+    /// Query bills for an account
+    Bills {
+        /// Account provider name or ID
+        account: String,
+        /// Filter to a specific year
+        year: Option<i32>,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Baseline
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand)]
+enum BaselineCommands {
+    /// Compute a weather-normalized baseline for an account
+    Compute {
+        /// Account provider name or ID
+        account: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Simulate
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand)]
+enum SimulateCommands {
+    /// Simulate swapping a heat pump to a different capacity
+    SwapPump {
+        /// Current heat pump nameplate (HP)
+        current_hp: f64,
+    },
+    /// Simulate switching to a different rate schedule
+    RateChange {
+        /// Name of the target rate schedule
+        to: String,
+    },
+    /// Simulate a thermostat setpoint change
+    Setpoint {
+        /// Degrees of change (+/-)
+        change: f64,
+        /// Season: "summer" or "winter"
+        season: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Experiment
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand)]
+enum ExperimentCommands {
+    /// Create a new experiment
+    Create,
+    /// List all experiments
+    List,
+    /// Show details of an experiment
+    Show {
+        /// Experiment ID
+        id: String,
+    },
+    /// Evaluate an experiment's results
+    Evaluate {
+        /// Experiment ID
+        id: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Report
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand)]
+enum ReportCommands {
+    /// Generate a monthly efficiency report
+    Monthly {
+        /// Month in YYYY-MM format
+        month: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    // Load .env file (ignore errors if not present)
+    let _ = dotenvy::dotenv();
+
+    // Set up tracing
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+        )
+        .init();
+
+    // Parse CLI args first (so --help works without DB)
+    let cli = Cli::parse();
+
+    // Create database pool
+    let database_url = std::env::var("DATABASE_URL")
+        .expect("DATABASE_URL must be set (in .env or environment)");
+    let pool = lothal_db::create_pool(&database_url).await?;
+
+    // Run migrations
+    lothal_db::run_migrations(&pool).await?;
+
+    match cli.command {
+        Commands::Init => {
+            commands::init::run_init(&pool).await?;
+        }
+
+        Commands::Site { command } => match command {
+            SiteCommands::Show => commands::site::show_site(&pool).await?,
+            SiteCommands::Edit => commands::site::edit_site(&pool).await?,
+        },
+
+        Commands::Device { command } => match command {
+            DeviceCommands::Add => commands::device::add_device(&pool).await?,
+            DeviceCommands::List => commands::device::list_devices(&pool).await?,
+            DeviceCommands::Show { id } => {
+                commands::device::show_device(&pool, &id).await?
+            }
+        },
+
+        Commands::Bill { command } => match command {
+            BillCommands::Add => commands::bill::add_bill(&pool).await?,
+            BillCommands::Import { path } => {
+                commands::bill::import_bill(&pool, &path).await?
+            }
+            BillCommands::List { account } => {
+                commands::bill::list_bills(&pool, account.as_deref()).await?
+            }
+        },
+
+        Commands::Ingest { command } => match command {
+            IngestCommands::Mqtt => {
+                commands::ingest::run_mqtt_ingest(&pool).await?;
+            }
+            IngestCommands::Weather { days } => {
+                commands::ingest::fetch_weather(&pool, days).await?;
+            }
+        },
+
+        Commands::Query { command } => match command {
+            QueryCommands::Readings { device, last } => {
+                commands::query::query_readings(&pool, &device, &last).await?;
+            }
+            QueryCommands::Bills { account, year } => {
+                commands::query::query_bills(&pool, &account, year).await?;
+            }
+        },
+
+        Commands::Baseline { command } => match command {
+            BaselineCommands::Compute { account } => {
+                commands::baseline::compute_baseline_cmd(&pool, &account).await?;
+            }
+        },
+
+        Commands::Simulate { command } => match command {
+            SimulateCommands::SwapPump { current_hp } => {
+                commands::simulate::simulate_swap_pump(&pool, current_hp).await?;
+            }
+            SimulateCommands::RateChange { to } => {
+                commands::simulate::simulate_rate_change(&pool, &to).await?;
+            }
+            SimulateCommands::Setpoint { change, season } => {
+                commands::simulate::simulate_setpoint(&pool, change, &season).await?;
+            }
+        },
+
+        Commands::Experiment { command } => match command {
+            ExperimentCommands::Create => {
+                commands::experiment::create_experiment(&pool).await?;
+            }
+            ExperimentCommands::List => {
+                commands::experiment::list_experiments(&pool).await?;
+            }
+            ExperimentCommands::Show { id } => {
+                commands::experiment::show_experiment(&pool, &id).await?;
+            }
+            ExperimentCommands::Evaluate { id } => {
+                commands::experiment::evaluate_experiment_cmd(&pool, &id).await?;
+            }
+        },
+
+        Commands::Recommend => {
+            commands::recommend::generate_recommendations(&pool).await?;
+        }
+
+        Commands::Report { command } => match command {
+            ReportCommands::Monthly { month } => {
+                commands::report::monthly_report(&pool, &month).await?;
+            }
+        },
+    }
+
+    Ok(())
+}

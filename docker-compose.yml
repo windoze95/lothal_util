@@ -1,0 +1,20 @@
+services:
+  db:
+    image: timescale/timescaledb:latest-pg17
+    container_name: lothal-db
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: lothal
+      POSTGRES_PASSWORD: lothal
+      POSTGRES_DB: lothal_util
+    volumes:
+      - lothal-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lothal -d lothal_util"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  lothal-pgdata:

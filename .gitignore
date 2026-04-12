@@ -1,0 +1,6 @@
+/target
+.env
+*.pdf
+*.swp
+*.swo
+.sqlx/
