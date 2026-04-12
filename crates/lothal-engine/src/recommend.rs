@@ -9,7 +9,6 @@ use lothal_core::ontology::bill::Bill;
 use lothal_core::ontology::device::{Device, DeviceKind};
 use lothal_core::ontology::experiment::{HypothesisCategory, Recommendation};
 use lothal_core::ontology::livestock::Flock;
-use lothal_core::ontology::tree::Tree;
 use lothal_core::ontology::water::{Pool, SepticSystem, WaterSource};
 use lothal_core::Usd;
 
@@ -36,8 +35,6 @@ pub struct SiteContext {
     /// A cooling or heating baseline model, if one has been computed.
     pub baseline: Option<BaselineModel>,
     // --- Property operations context ---
-    /// Significant trees on the property.
-    pub trees: Vec<Tree>,
     /// Pools on the property (first-class entities).
     pub pools: Vec<Pool>,
     /// Water sources available.
@@ -66,7 +63,6 @@ pub fn generate_recommendations(ctx: &SiteContext) -> Vec<Recommendation> {
     // Property operations recommendations
     recommend_pool_cover(ctx, &mut recs);
     recommend_rainwater_capture(ctx, &mut recs);
-    recommend_tree_shade(ctx, &mut recs);
     recommend_septic_maintenance(ctx, &mut recs);
     recommend_chicken_efficiency(ctx, &mut recs);
     recommend_garden_drip(ctx, &mut recs);
@@ -388,38 +384,6 @@ fn recommend_rainwater_capture(ctx: &SiteContext, recs: &mut Vec<Recommendation>
     recs.push(rec);
 }
 
-/// 10. Tree shade — recommend planting if south/west walls lack coverage.
-fn recommend_tree_shade(ctx: &SiteContext, recs: &mut Vec<Recommendation>) {
-    // Only recommend if we have tree data and see a gap
-    let has_sw_shade = ctx.trees.iter().any(|t| {
-        t.shade_direction
-            .as_ref()
-            .map(|d| {
-                let d = d.to_uppercase();
-                d.contains('S') || d.contains('W')
-            })
-            .unwrap_or(false)
-    });
-    if has_sw_shade {
-        return;
-    }
-
-    let mut rec = Recommendation::new(
-        ctx.site_id,
-        "Plant shade tree on south/west exposure".to_string(),
-        "No shade tree detected on the south or west side of the property. \
-         A well-placed deciduous tree can reduce cooling costs by 15-35% \
-         by shading walls and roof during summer while allowing winter sun. \
-         Savings compound as the tree matures."
-            .to_string(),
-        HypothesisCategory::LandManagement,
-        Usd::new(200.0), // conservative: grows over years
-        Usd::new(150.0), // tree + planting
-    );
-    rec.confidence = 0.5;
-    recs.push(rec);
-}
-
 /// 11. Septic maintenance — recommend proactive scheduling if overdue.
 fn recommend_septic_maintenance(ctx: &SiteContext, recs: &mut Vec<Recommendation>) {
     let septic = match &ctx.septic {
@@ -551,7 +515,6 @@ mod tests {
             devices: Vec::new(),
             recent_bills: Vec::new(),
             baseline: None,
-            trees: Vec::new(),
             pools: Vec::new(),
             water_sources: Vec::new(),
             septic: None,

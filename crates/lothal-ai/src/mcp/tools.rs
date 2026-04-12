@@ -171,7 +171,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "get_property_overview",
-            "description": "Comprehensive cross-system property status: zones, trees, water sources, pools, septic, flocks, garden beds, compost.",
+            "description": "Comprehensive cross-system property status: zones, water sources, pools, septic, flocks, garden beds, compost.",
             "inputSchema": {
                 "type": "object",
                 "required": ["site_id"],
@@ -527,7 +527,7 @@ fn parse_hypothesis_category(s: &str) -> lothal_core::HypothesisCategory {
         "maintenance" => lothal_core::HypothesisCategory::Maintenance,
         "water" | "water_conservation" => lothal_core::HypothesisCategory::WaterConservation,
         "livestock" | "chicken" => lothal_core::HypothesisCategory::LivestockOptimization,
-        "land" | "land_management" | "tree" => lothal_core::HypothesisCategory::LandManagement,
+        "land" | "land_management" => lothal_core::HypothesisCategory::LandManagement,
         _ => lothal_core::HypothesisCategory::Other,
     }
 }
@@ -543,12 +543,10 @@ async fn handle_get_property_zones(
     let site_id = parse_required_uuid(&args, "site_id")?;
     let zones = lothal_db::property_zone::list_property_zones_by_site(pool, site_id).await?;
     let constraints = lothal_db::property_zone::list_constraints_by_site(pool, site_id).await?;
-    let trees = lothal_db::property_zone::list_trees_by_site(pool, site_id).await?;
 
     Ok(json!({
         "zones": zones,
         "constraints": constraints,
-        "trees": trees,
     }))
 }
 
@@ -589,10 +587,9 @@ async fn handle_get_property_overview(
 ) -> Result<Value, AiError> {
     let site_id = parse_required_uuid(&args, "site_id")?;
 
-    let (zones, constraints, trees, water_sources, pools, septic, flocks, beds, compost) = tokio::try_join!(
+    let (zones, constraints, water_sources, pools, septic, flocks, beds, compost) = tokio::try_join!(
         async { lothal_db::property_zone::list_property_zones_by_site(pool, site_id).await },
         async { lothal_db::property_zone::list_constraints_by_site(pool, site_id).await },
-        async { lothal_db::property_zone::list_trees_by_site(pool, site_id).await },
         async { lothal_db::water::list_water_sources_by_site(pool, site_id).await },
         async { lothal_db::water::list_pools_by_site(pool, site_id).await },
         async { lothal_db::water::get_septic_system(pool, site_id).await },
@@ -604,7 +601,6 @@ async fn handle_get_property_overview(
     Ok(json!({
         "property_zones": zones,
         "constraints": constraints,
-        "trees": trees,
         "water_sources": water_sources,
         "pools": pools,
         "septic_system": septic,

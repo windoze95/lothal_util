@@ -65,7 +65,7 @@ enum Commands {
         #[command(subcommand)]
         command: AiCommands,
     },
-    /// Manage property zones, constraints, and trees
+    /// Manage property zones and constraints
     Property {
         #[command(subcommand)]
         command: PropertyCommands,
@@ -203,16 +203,6 @@ enum BaselineCommands {
 
 #[derive(Subcommand)]
 enum SimulateCommands {
-    /// Simulate swapping a heat pump to a different capacity
-    SwapPump {
-        /// Current heat pump nameplate (HP)
-        current_hp: f64,
-    },
-    /// Simulate switching to a different rate schedule
-    RateChange {
-        /// Name of the target rate schedule
-        to: String,
-    },
     /// Simulate a thermostat setpoint change
     Setpoint {
         /// Degrees of change (+/-)
@@ -306,12 +296,10 @@ enum AiCommands {
 
 #[derive(Subcommand)]
 enum PropertyCommands {
-    /// List property zones, constraints, and trees
+    /// List property zones and constraints
     List,
     /// Add a property zone
     AddZone,
-    /// Add a tree
-    AddTree,
     /// Add a constraint
     AddConstraint,
 }
@@ -466,12 +454,6 @@ async fn main() -> anyhow::Result<()> {
         },
 
         Commands::Simulate { command } => match command {
-            SimulateCommands::SwapPump { current_hp } => {
-                commands::simulate::simulate_swap_pump(&pool, current_hp).await?;
-            }
-            SimulateCommands::RateChange { to } => {
-                commands::simulate::simulate_rate_change(&pool, &to).await?;
-            }
             SimulateCommands::Setpoint { change, season } => {
                 commands::simulate::simulate_setpoint(&pool, change, &season).await?;
             }
@@ -526,7 +508,6 @@ async fn main() -> anyhow::Result<()> {
         Commands::Property { command } => match command {
             PropertyCommands::List => commands::property::list_zones(&pool).await?,
             PropertyCommands::AddZone => commands::property::add_zone(&pool).await?,
-            PropertyCommands::AddTree => commands::property::add_tree(&pool).await?,
             PropertyCommands::AddConstraint => commands::property::add_constraint(&pool).await?,
         },
 

@@ -1,8 +1,7 @@
 use std::collections::BTreeMap;
 
 use axum::extract::{Query, State};
-use axum::response::Html;
-use axum::routing::{get, post};
+use axum::routing::get;
 use axum::Router;
 use chrono::{Datelike, Local, NaiveDate};
 use serde::Deserialize;
@@ -21,7 +20,6 @@ pub fn router() -> Router<AppState> {
         .route("/partials/energy/chart", get(energy_chart_partial))
         .route("/partials/energy/circuits", get(circuits_partial))
         .route("/partials/bills/chart", get(bills_chart_partial))
-        .route("/partials/lab/simulate", post(simulate_partial))
 }
 
 #[derive(Deserialize)]
@@ -124,23 +122,6 @@ async fn bills_chart_partial(
     })
 }
 
-#[derive(Deserialize)]
-pub struct SimulateForm {
-    pub scenario: Option<String>,
-}
-
-async fn simulate_partial(
-    State(_state): State<AppState>,
-    axum::Form(_form): axum::Form<SimulateForm>,
-) -> Result<Html<String>, WebError> {
-    Ok(Html(
-        r#"<div class="bg-[#1a1d27] rounded-xl p-6 border border-[#2e3346]">
-            <p class="text-[#8b8fa3] text-sm">Simulation results will appear here. Connect your site data first.</p>
-        </div>"#
-            .into(),
-    ))
-}
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -199,4 +180,3 @@ async fn daily_energy_totals(
         .map(|(day, total_kwh)| DailyEnergy { day, total_kwh })
         .collect())
 }
-
