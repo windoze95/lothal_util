@@ -17,7 +17,6 @@ pub fn router() -> Router<AppState> {
         .route("/land", get(land))
         .route("/lab", get(lab))
         .route("/bills", get(bills))
-        .route("/chat", get(chat))
 }
 
 // ---------------------------------------------------------------------------
@@ -511,16 +510,3 @@ async fn bills(State(state): State<AppState>) -> Result<BillsPage, WebError> {
     })
 }
 
-// ---------------------------------------------------------------------------
-// Chat
-// ---------------------------------------------------------------------------
-
-async fn chat(State(state): State<AppState>) -> Result<ChatPage, WebError> {
-    let site = first_site(&state.pool).await?;
-    let name = site_name(&site);
-
-    Ok(ChatPage {
-        active_page: "chat".into(),
-        site_name: name,
-    })
-}
