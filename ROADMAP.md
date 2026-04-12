@@ -4,11 +4,104 @@
 
 5-crate Rust workspace: lothal-core (ontology types), lothal-db (sqlx/TimescaleDB), lothal-ingest (bill parsers, MQTT, NWS, Flume, Ecobee), lothal-engine (baselines, simulation, recommendations, experiments), lothal-cli (full interactive CLI). 16k lines, 50 tests, zero warnings.
 
+The ontology and data pipes work on their own. A clean Postgres schema with bills, readings, and weather is already more than most homeowners have. AI is a consumer of this ontology, not the load-bearing element.
+
 ---
 
-## Phase 2: Web Dashboard (lothal-web)
+## Phase 2: AI Layer (lothal-ai)
 
-New crate: `crates/lothal-web/` using **Axum** for the HTTP API + **htmx** with server-rendered templates for the frontend. This keeps the stack in Rust, avoids a separate JS build, and htmx gives interactive feel with minimal complexity.
+New crate: `crates/lothal-ai/`. Three distinct AI surfaces, built in order of ROI.
+
+### Guiding Principles
+
+- **LLM for extraction + reasoning + narrative. Code for math, validation, detection, control.**
+- If you can write the rule, write the rule. Don't ask a model to do arithmetic.
+- "LLM as extractor, code as validator" — the model parses, deterministic functions verify.
+- Ontology queries return real data. The agent reasons over results, not hallucinations.
+- Local models for narrow/frequent tasks. Frontier models for complex/rare reasoning.
+
+### 2a. Ingest Agent (build first — highest ROI)
+
+**Problem:** Every utility's PDF is a snowflake. Regex parsers break when they redesign the layout. The existing regex parsers in `lothal-ingest/src/bill/` work for known formats but are brittle and took significant effort.
+
+**Solution:** Replace regex bill parsing with LLM structured output extraction. One prompt with a `Bill` schema handles OG&E, ONG, Guthrie water, insurance declarations, and any future provider — and survives format changes.
+
+Implementation:
+- `fn parse_bill_with_llm(text: &str, account_id: Uuid) -> Result<Bill, IngestError>`
+- Extract PDF text with pdftotext (keep this — it's reliable)
+- Send text + structured output schema to Claude API (or local model)
+- Schema: `{ period_start, period_end, total_usage, usage_unit, total_amount, line_items: [{ description, category, amount }] }`
+- **Validate with code:** line items must sum to total (within $0.02). Reject and retry if they don't.
+- Keep regex parsers as fallback — if LLM extraction fails or is unavailable, fall back to the deterministic path
+- Scheduled mode: pull new bills from email (IMAP), parse, validate, write to Postgres. Cron-driven, boring, reliable.
+- **Model choice:** Local model (Gemma on starforge) is fine for this narrow extraction task. Cheap, fast, runs forever. Claude as fallback for tricky bills.
+
+### 2b. Daily Briefing (build second — immediate daily value)
+
+One prompt, runs every morning, looks at yesterday's data:
+- Compare usage to baseline (already computed by lothal-engine)
+- Flag anything anomalous (SQL detection) and **explain** it (LLM reasoning)
+- Stitch weather + occupancy + circuit data + maintenance log into 3-5 sentences a human can act on
+- Drop into Home Assistant notification, Slack, or stdout
+
+Example output:
+> Yesterday: 47.2 kWh ($5.18), 12% above baseline. CDD was 18 vs 14-day avg of 15, so weather explains about half. The other half: Circuit 7 (pool pump) ran 9.5 hours vs the usual 6 — check the timer schedule. HVAC filter was last changed 87 days ago (recommended: 90). No anomalies on water.
+
+**Model choice:** Cheap/local. The reasoning is shallow — it's summarizing structured data, not doing novel analysis.
+
+### 2c. Reasoning Agent (build last — needs months of data)
+
+The Foundry/AIP piece. An agent that sits behind an **MCP server** exposing tools for:
+- Querying the ontology (bills by period, readings by device/time, weather data)
+- Running statistical functions (baseline computation, normalization)
+- Looking up rate schedules and computing costs
+- Proposing `Hypothesis` and `Experiment` objects and writing them to the DB
+- Evaluating completed experiments with weather normalization
+
+Use cases:
+- **"What should I do this month?"** — agent queries bills, readings, weather, identifies highest-leverage interventions, proposes experiments
+- **"Why was my July bill so high?"** — agent pulls bills, weather, compares to baseline, checks circuit data, occupancy, explains in plain English
+- **"What did the pool pump cost me last month vs the month before?"** — natural language query that would be painful as ad-hoc SQL
+- **Maintenance reasoning** — "HVAC running 18% longer per CDD than last August. Filter due? Coils dirty? Refrigerant low?" Agent checks maintenance history, performance trends, typical failure modes, gives ranked differential with cheapest test first
+- **Hypothesis generation** — "Find the three highest-leverage interventions for reducing summer cooling cost" → agent runs queries, reasons over results, proposes Hypothesis objects with designed Experiments
+
+**Model choice:** Frontier model (Claude), used sparingly — this is complex multi-source reasoning.
+
+**MCP server shape:**
+```
+tools:
+  query_bills(account_id?, start?, end?) -> Bill[]
+  query_readings(source_id, kind, start, end) -> Reading[]
+  query_weather(site_id, start, end) -> WeatherObservation[]
+  get_devices(structure_id?) -> Device[]
+  get_rate_schedule(account_id) -> RateSchedule
+  compute_baseline(account_id, mode) -> BaselineModel
+  simulate(scenario) -> SimulationResult
+  create_hypothesis(title, description, category) -> Hypothesis
+  create_experiment(hypothesis_id, intervention, periods) -> Experiment
+  evaluate_experiment(experiment_id) -> ExperimentEvaluation
+```
+
+### 2d. Device Identification (NILM)
+
+Emporia gives per-circuit watts but doesn't know what's running. Classical signature-matching is brittle. An LLM that sees "Circuit 14, 4200W for 38min then 800W for 12min, weekday afternoon" can label it and explain its reasoning so you can correct it.
+
+- Build a labeled training set from the first few weeks of manual identification
+- Run inference on new patterns, write device attribution to readings metadata
+- **Model choice:** Local model (Gemma on starforge). Narrow task, runs frequently, needs to be cheap.
+
+### What AI Does NOT Do
+
+- **Real-time control loops** — that's a thermostat. LLM lives in the planning layer, not execution.
+- **Anomaly detection** — `kWh > 1.5 * 30d_avg AND temp < 95F` is a SQL query. Write the rule.
+- **Bill math** — LLM extracts, code validates. Models confidently round things.
+- **Forecasting** — Prophet/ARIMA/seasonal-naive beats an LLM on time-series and costs nothing.
+
+---
+
+## Phase 3: Web Dashboard (lothal-web)
+
+New crate: `crates/lothal-web/` using **Axum** + **htmx** with server-rendered templates.
 
 ### API Layer (Axum)
 - REST endpoints for all entities (CRUD for sites, devices, bills, etc.)
@@ -17,107 +110,98 @@ New crate: `crates/lothal-web/` using **Axum** for the HTTP API + **htmx** with 
 - Shared state: PgPool + app config passed via Axum state
 
 ### Dashboard Pages
-- **Home / Overview** — site summary card, current month cost/usage snapshot, weather widget, active experiments count, top recommendation
-- **Ontology Explorer** — interactive tree view of site > structures > zones > devices > circuits. Click any node to see details, readings, associated bills
-- **Bills & Costs** — monthly bar chart of cost by utility type, stacked area chart of usage over time, table of all bills with drill-down to line items, month-over-month and year-over-year comparisons
-- **Live Readings** — real-time charts (updating via WebSocket) for circuit-level power, water flow, HVAC runtime. Configurable time windows (1h, 24h, 7d, 30d)
-- **Simulation Playground** — interactive "what if" forms: select a scenario type (device swap, rate change, setpoint shift, insulation upgrade), fill parameters with sliders/dropdowns, see projected savings live. Side-by-side current vs projected cost visualization
-- **Experiments** — kanban-style board (planned / active / completed / inconclusive). Each card shows hypothesis, intervention, date ranges, and results. Click to see detailed pre/post weather-normalized charts
-- **Recommendations** — prioritized cards with estimated savings, capex, payback period, confidence bar. Filter by category. "Start Experiment" button to convert a recommendation into an active experiment
-- **Reports** — monthly and annual report generation with printable/PDF output
+- **Home / Overview** — site summary card, current month snapshot, weather, active experiments, top recommendation, daily briefing text
+- **Ontology Explorer** — interactive tree: site > structures > zones > devices > circuits
+- **Bills & Costs** — monthly bar/stacked-area charts, drill-down to line items, month-over-month and YoY comparisons
+- **Live Readings** — real-time charts via WebSocket, configurable time windows
+- **Simulation Playground** — interactive "what if" forms with sliders, side-by-side cost visualization
+- **Experiments** — kanban board (planned / active / completed / inconclusive), pre/post weather-normalized charts
+- **Recommendations** — prioritized cards with ROI, "Start Experiment" button
+- **Chat** — natural language interface to the reasoning agent (Phase 2c)
+- **Reports** — monthly/annual generation, printable output
 
-### Tech Details
-- Templates: Askama (Jinja-like, compile-time checked Rust templates) or Maud (macro-based HTML)
-- Charts: Chart.js via htmx partials, or Plotly.js for more complex visualizations
-- Styling: Tailwind CSS (via CDN or standalone binary — no Node required)
-- WebSocket: tokio-tungstenite for real-time reading pushes
-- Auth: optional, single-user by default (personal tool), simple token or cookie if needed
+### Tech
+- Templates: Askama or Maud (compile-time checked)
+- Charts: Chart.js or Plotly.js
+- Styling: Tailwind CSS (standalone binary, no Node)
+- WebSocket: tokio-tungstenite
+- Auth: optional, single-user default
 
 ---
 
-## Phase 3: Enhanced Data Sources
+## Phase 4: Enhanced Data Sources
 
 ### Home Assistant Integration
-- Direct HA REST API integration (alternative to MQTT for simpler setup)
-- Auto-discover HA entities and map to lothal devices/circuits
-- Import historical data from HA's recorder database
-
-### Smart Meter Direct Access
-- OG&E Green Button Connect My Data (if they support OAuth-based access)
-- Direct smart meter reading via RTL-SDR (some meters broadcast unencrypted AMR)
+- Direct HA REST API (alternative to MQTT)
+- Auto-discover HA entities → map to lothal devices/circuits
+- Import historical data from HA recorder
 
 ### Personal Weather Station
-- Ecowitt or Tempest station integration (local API or cloud API)
+- Ecowitt or Tempest integration (local or cloud API)
 - Higher fidelity than NWS for on-property microclimate
 
+### Smart Meter Direct Access
+- OG&E Green Button Connect My Data (OAuth)
+- RTL-SDR for unencrypted AMR meters
+
 ### Solar Monitoring (future-proofing)
-- Enphase / SolarEdge API integration for production data
-- Net metering cost calculations against rate schedules
-
----
-
-## Phase 4: Smarter Analytics
-
-### Machine Learning Baselines
-- Replace simple linear regression with gradient-boosted models (using temperature, humidity, day-of-week, occupancy as features)
-- Anomaly detection: flag unusual consumption patterns (leaks, stuck HVAC, phantom loads)
-- Seasonal decomposition for more accurate year-over-year comparisons
-
-### Automated Recommendations
-- Triggered recommendations based on real-time data (e.g., "your pool pump has been running for 12 hours — consider a variable-speed upgrade")
-- Cost alerts when projected monthly bill exceeds threshold
-- TOU optimization alerts ("shift 3kWh of load from 2-5pm to save $X this month")
-
-### Forecasting
-- Monthly bill forecasting based on weather forecast + baseline model
-- "What will this month's bill be?" with confidence intervals
-- Budget planning: annual cost projection with seasonal patterns
+- Enphase / SolarEdge API
+- Net metering cost calculations
 
 ---
 
 ## Phase 5: Automation & Notifications
 
 ### Home Assistant Automations
-- Generate HA automation YAML from lothal recommendations (e.g., "schedule pool pump to run 11pm-7am" → HA automation)
-- Closed-loop experiments: lothal creates the automation, monitors the result, evaluates automatically
+- Generate HA automation YAML from recommendations ("schedule pool pump 11pm-7am")
+- Closed-loop experiments: lothal creates automation, monitors result, evaluates automatically
 
 ### Notifications
-- Slack/Discord/email alerts for: anomalies, experiment results, bill spikes, maintenance reminders
-- Weekly/monthly digest emails with efficiency summary
+- Daily briefing → HA notification / Slack / email (wired to Phase 2b)
+- Alerts: anomalies, experiment results, bill spikes, maintenance reminders
+- Weekly/monthly digest
 
 ### Scheduled Jobs
-- Cron-based weather fetch, bill reminder, report generation
-- systemd service for continuous MQTT ingest + WebSocket server
+- Cron: weather fetch, bill ingest from email, daily briefing, report generation
+- systemd services for MQTT ingest + web server
 
 ---
 
-## Phase 6: Multi-Property & Sharing
+## Phase 6: Smarter Analytics (non-AI)
 
-### Multi-Site Support
-- Already modeled (Site is top-level entity) but UI/CLI assumes single site
-- Property comparison dashboards
-- Portfolio-level analytics
+### Statistical Forecasting
+- Prophet / ARIMA / seasonal-naive for bill forecasting
+- "What will this month's bill be?" with confidence intervals
+- Annual cost projection with seasonal patterns
 
-### Export & Sharing
-- Export data as CSV/JSON for external analysis
-- Shareable reports (static HTML generation)
-- Home energy audit document generation (for insurance, appraisals, or green certification)
+### Improved Baselines
+- Multi-feature regression (temperature, humidity, day-of-week, occupancy)
+- Seasonal decomposition for YoY comparisons
+
+### Anomaly Detection Rules
+- Configurable SQL-based rules with thresholds
+- Alert integration (feeds into Phase 5 notifications)
+- Anomaly explanations powered by reasoning agent (Phase 2c)
 
 ---
 
-## Non-Functional Improvements
+## Phase 7: Multi-Property & Sharing
+
+- Multi-site dashboards and portfolio analytics
+- Export: CSV/JSON/static HTML reports
+- Home energy audit document generation
+
+---
+
+## Non-Functional
 
 ### Testing
-- Integration tests against a test database (Docker-based test harness)
-- Property-based tests for bill parsers (generate random bill text, verify parser handles it)
+- Integration tests against Docker test DB
+- Property-based tests for parsers
 - End-to-end CLI tests
 
-### Observability
-- Structured logging with tracing spans across all operations
-- Metrics: ingest throughput, query latency, parser success/failure rates
-
 ### Deployment
-- Single-binary release builds (cross-compile for x86_64 Linux)
-- systemd unit files for lothal-web and lothal-ingest-mqtt
-- Docker image for the full stack (web + worker + TimescaleDB)
-- Nix flake for reproducible builds (matches Julian's Arch setup)
+- Single-binary release builds
+- systemd unit files
+- Docker image (web + worker + TimescaleDB)
+- Nix flake
