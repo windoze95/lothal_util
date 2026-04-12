@@ -1,6 +1,8 @@
 pub mod ai;
 pub mod baseline;
 pub mod bill;
+pub mod daemon;
+pub mod demo;
 pub mod device;
 pub mod experiment;
 pub mod garden;

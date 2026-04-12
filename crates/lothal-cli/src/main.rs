@@ -85,6 +85,10 @@ enum Commands {
         #[command(subcommand)]
         command: GardenCommands,
     },
+    /// Run the scheduler daemon (weather pull, email ingest, anomaly sweep, daily briefing)
+    Daemon,
+    /// Seed a Guthrie-shaped demo dataset so the web dashboard renders meaningfully on day 1
+    DemoSeed,
 }
 
 // ---------------------------------------------------------------------------
@@ -526,6 +530,14 @@ async fn main() -> anyhow::Result<()> {
             GardenCommands::AddPlanting => commands::garden::add_planting(&pool).await?,
             GardenCommands::AddCompost => commands::garden::add_compost_pile(&pool).await?,
         },
+
+        Commands::Daemon => {
+            commands::daemon::run(pool).await?;
+        }
+
+        Commands::DemoSeed => {
+            commands::demo::seed(&pool).await?;
+        }
     }
 
     Ok(())
