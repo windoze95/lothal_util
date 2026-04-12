@@ -57,6 +57,19 @@ pub async fn list_sites(pool: &PgPool) -> Result<Vec<Site>, sqlx::Error> {
     Ok(rows.iter().map(site_from_row).collect())
 }
 
+pub async fn update_site_boundary(
+    pool: &PgPool,
+    site_id: Uuid,
+    boundary: serde_json::Value,
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query("UPDATE sites SET boundary = $2 WHERE id = $1")
+        .bind(site_id)
+        .bind(boundary)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected())
+}
+
 pub async fn update_site(pool: &PgPool, site: &Site) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"UPDATE sites SET address = $2, city = $3, state = $4, zip = $5,
@@ -125,6 +138,19 @@ pub async fn insert_structure(pool: &PgPool, structure: &Structure) -> Result<()
     .execute(pool)
     .await?;
     Ok(())
+}
+
+pub async fn update_structure_footprint(
+    pool: &PgPool,
+    structure_id: Uuid,
+    footprint: serde_json::Value,
+) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query("UPDATE structures SET footprint = $2 WHERE id = $1")
+        .bind(structure_id)
+        .bind(footprint)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected())
 }
 
 pub async fn get_structures_by_site(

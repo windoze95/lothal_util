@@ -85,6 +85,11 @@ enum Commands {
         #[command(subcommand)]
         command: GardenCommands,
     },
+    /// Import property geography (GeoJSON boundaries, footprints, zone shapes)
+    Geometry {
+        #[command(subcommand)]
+        command: GeometryCommands,
+    },
     /// Run the scheduler daemon (weather pull, email ingest, anomaly sweep, daily briefing)
     Daemon,
     /// Seed a Guthrie-shaped demo dataset so the web dashboard renders meaningfully on day 1
@@ -364,6 +369,23 @@ enum GardenCommands {
 }
 
 // ---------------------------------------------------------------------------
+// Geometry
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand)]
+enum GeometryCommands {
+    /// Import a GeoJSON FeatureCollection file and update site/structure/zone geometry
+    Import {
+        /// Site UUID (used when a feature's target is `site_boundary`)
+        #[arg(long)]
+        site: String,
+        /// Path to the GeoJSON FeatureCollection file
+        #[arg(long)]
+        file: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -529,6 +551,12 @@ async fn main() -> anyhow::Result<()> {
             GardenCommands::AddBed => commands::garden::add_bed(&pool).await?,
             GardenCommands::AddPlanting => commands::garden::add_planting(&pool).await?,
             GardenCommands::AddCompost => commands::garden::add_compost_pile(&pool).await?,
+        },
+
+        Commands::Geometry { command } => match command {
+            GeometryCommands::Import { site, file } => {
+                commands::geometry::import(&pool, &site, &file).await?;
+            }
         },
 
         Commands::Daemon => {
