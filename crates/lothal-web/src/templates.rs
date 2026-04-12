@@ -138,16 +138,6 @@ pub struct GardenBedDisplay {
     pub active_plantings: i32,
 }
 
-/// Simulation result for the lab page.
-#[derive(Debug, Clone, Serialize)]
-pub struct SimulationResult {
-    pub scenario: String,
-    pub current_annual_cost: f64,
-    pub projected_annual_cost: f64,
-    pub annual_savings: f64,
-    pub payback_years: Option<f64>,
-}
-
 // ---------------------------------------------------------------------------
 // Page templates — each corresponds to a full-page HTML render
 // ---------------------------------------------------------------------------

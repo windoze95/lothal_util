@@ -9,7 +9,6 @@
     <div class="flex gap-1 bg-[#1a1d27] rounded-lg p-1 border border-[#2e3346] w-fit">
       <button @click="tab = 'recommendations'" :class="tab === 'recommendations' ? 'bg-[#232736] text-white' : 'text-[#8b8fa3]'" class="px-4 py-2 text-sm rounded-md transition-colors">Recommendations</button>
       <button @click="tab = 'experiments'" :class="tab === 'experiments' ? 'bg-[#232736] text-white' : 'text-[#8b8fa3]'" class="px-4 py-2 text-sm rounded-md transition-colors">Experiments</button>
-      <button @click="tab = 'simulate'" :class="tab === 'simulate' ? 'bg-[#232736] text-white' : 'text-[#8b8fa3]'" class="px-4 py-2 text-sm rounded-md transition-colors">Simulate</button>
     </div>
 
     <!-- Recommendations -->
@@ -96,26 +95,6 @@
       {% endif %}
     </div>
 
-    <!-- Simulate -->
-    <div x-show="tab === 'simulate'" class="space-y-4">
-      <div class="bg-[#1a1d27] rounded-xl p-6 border border-[#2e3346]">
-        <h3 class="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider mb-4">What-If Simulation</h3>
-        <form hx-post="/partials/lab/simulate" hx-target="#simulate-result" hx-swap="innerHTML" class="space-y-4">
-          <div>
-            <label class="block text-sm text-[#8b8fa3] mb-2">Scenario</label>
-            <select name="scenario" class="w-full bg-[#232736] border border-[#2e3346] rounded-lg px-3 py-2 text-sm text-[#e8eaed] focus:outline-none focus:border-[#4f9cf7]">
-              <option value="swap-pump">Pool pump upgrade (variable-speed)</option>
-              <option value="rate-change">Switch to TOU rate</option>
-              <option value="setpoint">Thermostat setpoint change</option>
-            </select>
-          </div>
-          <button type="submit" class="px-4 py-2 bg-[#4f9cf7] text-white text-sm rounded-lg hover:bg-[#4f9cf7]/80 transition-colors">
-            Run Simulation
-          </button>
-        </form>
-      </div>
-      <div id="simulate-result"></div>
-    </div>
   </div>
 </div>
 {% endblock %}

@@ -5,8 +5,7 @@ use lothal_core::ontology::property_zone::{
     Constraint, ConstraintKind, DrainageType, PropertyZone, PropertyZoneKind, Slope, SunExposure,
 };
 use lothal_core::ontology::site::SoilType;
-use lothal_core::ontology::tree::{Tree, TreeHealth};
-use lothal_core::units::{SquareFeet, Usd};
+use lothal_core::units::SquareFeet;
 
 // ---------------------------------------------------------------------------
 // PropertyZone
@@ -203,108 +202,3 @@ fn constraint_from_row(row: &sqlx::postgres::PgRow) -> Constraint {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Tree
-// ---------------------------------------------------------------------------
-
-pub async fn insert_tree(pool: &PgPool, tree: &Tree) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        r#"INSERT INTO trees
-               (id, site_id, property_zone_id, species, common_name,
-                canopy_radius_ft, height_ft, health, distance_to_structure_ft,
-                shade_direction, estimated_cooling_value_usd, notes,
-                created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)"#,
-    )
-    .bind(tree.id)
-    .bind(tree.site_id)
-    .bind(tree.property_zone_id)
-    .bind(&tree.species)
-    .bind(&tree.common_name)
-    .bind(tree.canopy_radius_ft)
-    .bind(tree.height_ft)
-    .bind(tree.health.to_string())
-    .bind(tree.distance_to_structure_ft)
-    .bind(&tree.shade_direction)
-    .bind(tree.estimated_cooling_value_usd.map(|u| u.value()))
-    .bind(&tree.notes)
-    .bind(tree.created_at)
-    .bind(tree.updated_at)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-pub async fn get_tree(pool: &PgPool, id: Uuid) -> Result<Option<Tree>, sqlx::Error> {
-    let row = sqlx::query(
-        "SELECT id, site_id, property_zone_id, species, common_name,
-                canopy_radius_ft, height_ft, health, distance_to_structure_ft,
-                shade_direction, estimated_cooling_value_usd, notes,
-                created_at, updated_at
-         FROM trees WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?;
-
-    Ok(row.map(|r| tree_from_row(&r)))
-}
-
-pub async fn list_trees_by_site(
-    pool: &PgPool,
-    site_id: Uuid,
-) -> Result<Vec<Tree>, sqlx::Error> {
-    let rows = sqlx::query(
-        "SELECT id, site_id, property_zone_id, species, common_name,
-                canopy_radius_ft, height_ft, health, distance_to_structure_ft,
-                shade_direction, estimated_cooling_value_usd, notes,
-                created_at, updated_at
-         FROM trees WHERE site_id = $1 ORDER BY species",
-    )
-    .bind(site_id)
-    .fetch_all(pool)
-    .await?;
-
-    Ok(rows.iter().map(tree_from_row).collect())
-}
-
-pub async fn list_trees_by_zone(
-    pool: &PgPool,
-    zone_id: Uuid,
-) -> Result<Vec<Tree>, sqlx::Error> {
-    let rows = sqlx::query(
-        "SELECT id, site_id, property_zone_id, species, common_name,
-                canopy_radius_ft, height_ft, health, distance_to_structure_ft,
-                shade_direction, estimated_cooling_value_usd, notes,
-                created_at, updated_at
-         FROM trees WHERE property_zone_id = $1 ORDER BY species",
-    )
-    .bind(zone_id)
-    .fetch_all(pool)
-    .await?;
-
-    Ok(rows.iter().map(tree_from_row).collect())
-}
-
-fn tree_from_row(row: &sqlx::postgres::PgRow) -> Tree {
-    use sqlx::Row;
-    let health_str: String = row.get("health");
-    let cooling: Option<f64> = row.get("estimated_cooling_value_usd");
-
-    Tree {
-        id: row.get("id"),
-        site_id: row.get("site_id"),
-        property_zone_id: row.get("property_zone_id"),
-        species: row.get("species"),
-        common_name: row.get("common_name"),
-        canopy_radius_ft: row.get("canopy_radius_ft"),
-        height_ft: row.get("height_ft"),
-        health: health_str.parse().unwrap_or(TreeHealth::Unknown),
-        distance_to_structure_ft: row.get("distance_to_structure_ft"),
-        shade_direction: row.get("shade_direction"),
-        estimated_cooling_value_usd: cooling.map(Usd::new),
-        notes: row.get("notes"),
-        created_at: row.get("created_at"),
-        updated_at: row.get("updated_at"),
-    }
-}

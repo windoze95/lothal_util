@@ -48,7 +48,6 @@ pub enum MaintenanceTarget {
     Structure(Uuid),
     PropertyZone(Uuid),
     Pool(Uuid),
-    Tree(Uuid),
     SepticSystem(Uuid),
 }
 
@@ -59,7 +58,6 @@ impl MaintenanceTarget {
             Self::Structure(_) => "structure",
             Self::PropertyZone(_) => "property_zone",
             Self::Pool(_) => "pool",
-            Self::Tree(_) => "tree",
             Self::SepticSystem(_) => "septic_system",
         }
     }
@@ -70,7 +68,6 @@ impl MaintenanceTarget {
             | Self::Structure(id)
             | Self::PropertyZone(id)
             | Self::Pool(id)
-            | Self::Tree(id)
             | Self::SepticSystem(id) => *id,
         }
     }
@@ -92,8 +89,6 @@ pub enum MaintenanceType {
     PaddockRotation,
     CompostTurning,
     GardenAmendment,
-    TreeTrimming,
-    TreeRemoval,
     Other,
 }
 
@@ -113,8 +108,6 @@ impl std::fmt::Display for MaintenanceType {
             Self::PaddockRotation => write!(f, "Paddock Rotation"),
             Self::CompostTurning => write!(f, "Compost Turning"),
             Self::GardenAmendment => write!(f, "Garden Amendment"),
-            Self::TreeTrimming => write!(f, "Tree Trimming"),
-            Self::TreeRemoval => write!(f, "Tree Removal"),
             Self::Other => write!(f, "Other"),
         }
     }

@@ -22,7 +22,6 @@ pub fn router() -> Router<AppState> {
         .route("/partials/energy/chart", get(energy_chart_partial))
         .route("/partials/energy/circuits", get(circuits_partial))
         .route("/partials/bills/chart", get(bills_chart_partial))
-        .route("/partials/lab/simulate", post(simulate_partial))
         .route("/partials/chat/send", post(chat_send_partial))
 }
 
@@ -124,23 +123,6 @@ async fn bills_chart_partial(
         config_json: charts::to_chart_json(&config),
         height: "300px".into(),
     })
-}
-
-#[derive(Deserialize)]
-pub struct SimulateForm {
-    pub scenario: Option<String>,
-}
-
-async fn simulate_partial(
-    State(_state): State<AppState>,
-    axum::Form(_form): axum::Form<SimulateForm>,
-) -> Result<Html<String>, WebError> {
-    Ok(Html(
-        r#"<div class="bg-[#1a1d27] rounded-xl p-6 border border-[#2e3346]">
-            <p class="text-[#8b8fa3] text-sm">Simulation results will appear here. Connect your site data first.</p>
-        </div>"#
-            .into(),
-    ))
 }
 
 #[derive(Deserialize)]

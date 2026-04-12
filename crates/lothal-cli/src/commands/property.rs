@@ -3,7 +3,6 @@ use dialoguer::{Input, Select};
 use sqlx::PgPool;
 
 use lothal_core::ontology::property_zone::*;
-use lothal_core::ontology::tree::*;
 use lothal_core::units::SquareFeet;
 
 pub async fn list_zones(pool: &PgPool) -> anyhow::Result<()> {
@@ -12,7 +11,6 @@ pub async fn list_zones(pool: &PgPool) -> anyhow::Result<()> {
 
     let zones = lothal_db::property_zone::list_property_zones_by_site(pool, site.id).await?;
     let constraints = lothal_db::property_zone::list_constraints_by_site(pool, site.id).await?;
-    let trees = lothal_db::property_zone::list_trees_by_site(pool, site.id).await?;
 
     if zones.is_empty() {
         println!("No property zones defined. Use `lothal property add-zone` to add one.");
@@ -38,15 +36,6 @@ pub async fn list_zones(pool: &PgPool) -> anyhow::Result<()> {
         println!("\nConstraints:");
         for c in &constraints {
             println!("  [{}] {}", c.kind, c.description);
-        }
-    }
-
-    if !trees.is_empty() {
-        println!("\nTrees:");
-        for t in &trees {
-            let canopy = t.canopy_radius_ft.map(|r| format!(" ({r:.0}ft canopy)")).unwrap_or_default();
-            let health = t.health.to_string();
-            println!("  {} {}{canopy} - {health}", t.species, t.common_name.as_deref().unwrap_or(""));
         }
     }
 
@@ -81,45 +70,6 @@ pub async fn add_zone(pool: &PgPool) -> anyhow::Result<()> {
 
     lothal_db::property_zone::insert_property_zone(pool, &zone).await?;
     println!("Added property zone: {} ({})", zone.name, zone.kind);
-    Ok(())
-}
-
-pub async fn add_tree(pool: &PgPool) -> anyhow::Result<()> {
-    let sites = lothal_db::site::list_sites(pool).await?;
-    let site = sites.first().ok_or_else(|| anyhow::anyhow!("No sites found."))?;
-
-    let species: String = Input::new().with_prompt("Species (scientific name)").interact_text()?;
-    let common: String = Input::new()
-        .with_prompt("Common name (blank to skip)")
-        .default(String::new())
-        .interact_text()?;
-
-    let health_opts = ["excellent", "good", "fair", "poor", "dead", "unknown"];
-    let health_idx = Select::new()
-        .with_prompt("Health")
-        .items(&health_opts)
-        .default(5)
-        .interact()?;
-    let health: TreeHealth = health_opts[health_idx].parse().map_err(|e: String| anyhow::anyhow!(e))?;
-
-    let canopy_str: String = Input::new()
-        .with_prompt("Canopy radius (ft, blank to skip)")
-        .default(String::new())
-        .interact_text()?;
-
-    let shade: String = Input::new()
-        .with_prompt("Shade direction (N, NE, S, SW, etc., blank to skip)")
-        .default(String::new())
-        .interact_text()?;
-
-    let mut tree = Tree::new(site.id, species);
-    tree.common_name = if common.is_empty() { None } else { Some(common) };
-    tree.health = health;
-    tree.canopy_radius_ft = canopy_str.parse().ok();
-    tree.shade_direction = if shade.is_empty() { None } else { Some(shade) };
-
-    lothal_db::property_zone::insert_tree(pool, &tree).await?;
-    println!("Added tree: {} ({})", tree.species, tree.health);
     Ok(())
 }
 

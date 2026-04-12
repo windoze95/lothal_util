@@ -215,7 +215,6 @@ pub async fn build_recommendations(
 
     let site = lothal_db::site::get_site(pool, site_id).await?.unwrap();
     let bills = all_bills_for_site(pool, site_id, 12).await;
-    let trees = lothal_db::property_zone::list_trees_by_site(pool, site_id).await.unwrap_or_default();
     let pools = lothal_db::water::list_pools_by_site(pool, site_id).await.unwrap_or_default();
     let water_sources = lothal_db::water::list_water_sources_by_site(pool, site_id).await.unwrap_or_default();
     let septic = lothal_db::water::get_septic_system(pool, site_id).await.unwrap_or(None);
@@ -229,7 +228,6 @@ pub async fn build_recommendations(
         devices,
         recent_bills: bills,
         baseline: None,
-        trees,
         pools,
         water_sources,
         septic,

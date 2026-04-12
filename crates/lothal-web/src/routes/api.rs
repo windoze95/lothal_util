@@ -154,12 +154,10 @@ async fn property_overview(
     match sites.into_iter().next() {
         Some(s) => {
             let zones = lothal_db::property_zone::list_property_zones_by_site(&state.pool, s.id).await.unwrap_or_default();
-            let trees = lothal_db::property_zone::list_trees_by_site(&state.pool, s.id).await.unwrap_or_default();
             let pools = lothal_db::water::list_pools_by_site(&state.pool, s.id).await.unwrap_or_default();
 
             Ok(Json(serde_json::json!({
                 "zones": zones.len(),
-                "trees": trees.len(),
                 "pools": pools.len(),
             })))
         }
