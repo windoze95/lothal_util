@@ -2,13 +2,13 @@
 
 ## What Exists (v0.1 — CLI Foundation)
 
-5-crate Rust workspace: lothal-core (ontology types), lothal-db (sqlx/TimescaleDB), lothal-ingest (bill parsers, MQTT, NWS, Flume, Ecobee), lothal-engine (baselines, simulation, recommendations, experiments), lothal-cli (full interactive CLI). 16k lines, 50 tests, zero warnings.
+6-crate Rust workspace: lothal-core (ontology types), lothal-db (sqlx/TimescaleDB), lothal-ingest (bill parsers, MQTT, NWS, Flume, Ecobee), lothal-engine (baselines, simulation, recommendations, experiments), lothal-ai (LLM bill parsing, daily briefings, MCP reasoning agent, NILM), lothal-cli (full interactive CLI). ~19k lines, 105 tests, zero warnings.
 
 The ontology and data pipes work on their own. A clean Postgres schema with bills, readings, and weather is already more than most homeowners have. AI is a consumer of this ontology, not the load-bearing element.
 
 ---
 
-## Phase 2: AI Layer (lothal-ai)
+## Phase 2: AI Layer (lothal-ai) -- IMPLEMENTED
 
 New crate: `crates/lothal-ai/`. Three distinct AI surfaces, built in order of ROI.
 

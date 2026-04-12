@@ -2,6 +2,7 @@ pub mod pool;
 pub mod repo;
 
 pub use pool::{create_pool, run_migrations};
+pub use repo::ai;
 pub use repo::bill;
 pub use repo::device;
 pub use repo::experiment;

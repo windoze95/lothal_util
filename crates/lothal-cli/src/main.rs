@@ -60,6 +60,11 @@ enum Commands {
         #[command(subcommand)]
         command: ReportCommands,
     },
+    /// AI-powered features
+    Ai {
+        #[command(subcommand)]
+        command: AiCommands,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -224,6 +229,49 @@ enum ReportCommands {
 }
 
 // ---------------------------------------------------------------------------
+// AI
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand)]
+enum AiCommands {
+    /// Check LLM provider connectivity
+    Status,
+    /// Parse a bill using LLM structured output
+    ParseBill {
+        /// Path to the PDF file
+        path: String,
+        /// Override LLM provider (ollama, anthropic)
+        #[arg(long)]
+        provider: Option<String>,
+    },
+    /// Generate a daily briefing
+    Briefing {
+        /// Date to analyze (default: yesterday)
+        #[arg(long)]
+        date: Option<String>,
+        /// Output target: stdout, ha, slack
+        #[arg(long, default_value = "stdout")]
+        output: String,
+    },
+    /// Start MCP server for the reasoning agent
+    McpServer,
+    /// Poll email for new utility bills
+    IngestEmail {
+        /// Run once and exit (vs continuous polling)
+        #[arg(long)]
+        once: bool,
+    },
+    /// Run NILM device identification on circuits
+    Identify {
+        /// Circuit UUID or "all"
+        circuit: String,
+        /// Time window to analyze (e.g., "7d", "30d")
+        #[arg(default_value = "7d")]
+        window: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -337,6 +385,27 @@ async fn main() -> anyhow::Result<()> {
         Commands::Report { command } => match command {
             ReportCommands::Monthly { month } => {
                 commands::report::monthly_report(&pool, &month).await?;
+            }
+        },
+
+        Commands::Ai { command } => match command {
+            AiCommands::Status => {
+                commands::ai::check_status().await?;
+            }
+            AiCommands::ParseBill { path, provider } => {
+                commands::ai::parse_bill(&pool, &path, provider.as_deref()).await?;
+            }
+            AiCommands::Briefing { date, output } => {
+                commands::ai::briefing(&pool, date.as_deref(), &output).await?;
+            }
+            AiCommands::McpServer => {
+                commands::ai::mcp_server(pool).await?;
+            }
+            AiCommands::IngestEmail { once } => {
+                commands::ai::ingest_email(&pool, once).await?;
+            }
+            AiCommands::Identify { circuit, window } => {
+                commands::ai::identify(&pool, &circuit, &window).await?;
             }
         },
     }

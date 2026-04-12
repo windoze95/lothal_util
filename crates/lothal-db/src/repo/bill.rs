@@ -18,8 +18,10 @@ pub async fn insert_bill(pool: &PgPool, bill: &Bill) -> Result<(), sqlx::Error> 
     sqlx::query(
         r#"INSERT INTO bills (id, account_id, period_start, period_end,
                               statement_date, due_date, total_usage, usage_unit,
-                              total_amount, source_file, notes, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)"#,
+                              total_amount, source_file, notes, created_at, updated_at,
+                              parse_method, llm_model, llm_confidence)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+                   $14, $15, $16)"#,
     )
     .bind(bill.id)
     .bind(bill.account_id)
@@ -34,6 +36,9 @@ pub async fn insert_bill(pool: &PgPool, bill: &Bill) -> Result<(), sqlx::Error> 
     .bind(&bill.notes)
     .bind(bill.created_at)
     .bind(bill.updated_at)
+    .bind(&bill.parse_method)
+    .bind(&bill.llm_model)
+    .bind(bill.llm_confidence)
     .execute(&mut *tx)
     .await?;
 
@@ -63,7 +68,7 @@ pub async fn get_bill(pool: &PgPool, id: Uuid) -> Result<Option<Bill>, sqlx::Err
     let bill_row = sqlx::query(
         "SELECT id, account_id, period_start, period_end, statement_date, due_date,
                 total_usage, usage_unit, total_amount, source_file, notes,
-                created_at, updated_at
+                parse_method, llm_model, llm_confidence, created_at, updated_at
          FROM bills WHERE id = $1",
     )
     .bind(id)
@@ -101,7 +106,7 @@ pub async fn list_bills_by_account(
     let rows = sqlx::query(
         "SELECT id, account_id, period_start, period_end, statement_date, due_date,
                 total_usage, usage_unit, total_amount, source_file, notes,
-                created_at, updated_at
+                parse_method, llm_model, llm_confidence, created_at, updated_at
          FROM bills WHERE account_id = $1 ORDER BY period_start",
     )
     .bind(account_id)
@@ -120,7 +125,7 @@ pub async fn list_bills_by_account_and_range(
     let rows = sqlx::query(
         "SELECT id, account_id, period_start, period_end, statement_date, due_date,
                 total_usage, usage_unit, total_amount, source_file, notes,
-                created_at, updated_at
+                parse_method, llm_model, llm_confidence, created_at, updated_at
          FROM bills
          WHERE account_id = $1 AND period_start >= $2 AND period_end <= $3
          ORDER BY period_start",
@@ -150,6 +155,9 @@ fn bill_from_row(row: &sqlx::postgres::PgRow) -> Bill {
         line_items: Vec::new(), // populated separately when needed
         source_file: row.get("source_file"),
         notes: row.get("notes"),
+        parse_method: row.get("parse_method"),
+        llm_model: row.get("llm_model"),
+        llm_confidence: row.get("llm_confidence"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     }

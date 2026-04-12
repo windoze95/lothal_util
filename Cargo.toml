@@ -5,6 +5,7 @@ members = [
     "crates/lothal-db",
     "crates/lothal-ingest",
     "crates/lothal-engine",
+    "crates/lothal-ai",
     "crates/lothal-cli",
 ]
 
@@ -76,3 +77,4 @@ lothal-core = { path = "crates/lothal-core" }
 lothal-db = { path = "crates/lothal-db" }
 lothal-ingest = { path = "crates/lothal-ingest" }
 lothal-engine = { path = "crates/lothal-engine" }
+lothal-ai = { path = "crates/lothal-ai" }

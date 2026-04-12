@@ -19,6 +19,9 @@ pub struct Bill {
     pub line_items: Vec<BillLineItem>,
     pub source_file: Option<String>,
     pub notes: Option<String>,
+    pub parse_method: Option<String>,
+    pub llm_model: Option<String>,
+    pub llm_confidence: Option<f64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -46,6 +49,9 @@ impl Bill {
             line_items: Vec::new(),
             source_file: None,
             notes: None,
+            parse_method: None,
+            llm_model: None,
+            llm_confidence: None,
             created_at: now,
             updated_at: now,
         }

@@ -1155,6 +1155,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
+name = "lothal-ai"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "lothal-core",
+ "lothal-db",
+ "lothal-engine",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "lothal-cli"
 version = "0.1.0"
 dependencies = [
@@ -1165,6 +1183,7 @@ dependencies = [
  "dialoguer",
  "dotenvy",
  "indicatif",
+ "lothal-ai",
  "lothal-core",
  "lothal-db",
  "lothal-engine",

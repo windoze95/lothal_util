@@ -6,7 +6,7 @@ Built for a 1984 two-story in Guthrie, OK — but the ontology is general.
 
 ## Architecture
 
-Rust workspace with five crates:
+Rust workspace with six crates:
 
 | Crate | Purpose |
 |---|---|
@@ -14,7 +14,8 @@ Rust workspace with five crates:
 | `lothal-db` | sqlx persistence layer — PostgreSQL + TimescaleDB, async CRUD, batch inserts, daily weather aggregation |
 | `lothal-ingest` | Data pipelines — PDF bill parsers (OG&E, ONG, Guthrie water), Green Button XML, CSV import, MQTT subscriber, NWS weather API, Flume water meter, Ecobee thermostat |
 | `lothal-engine` | Analytics — weather-normalized baselines (linear regression), simulation engine (device swap, TOU shift, setpoint change, insulation upgrade), recommendation generator, experiment evaluator |
-| `lothal-cli` | CLI binary — interactive onboarding wizard, data management, querying, simulation, experiment tracking, recommendations, reports |
+| `lothal-ai` | AI layer — LLM bill parsing with structured output, daily briefings, MCP reasoning agent, NILM device identification |
+| `lothal-cli` | CLI binary — interactive onboarding wizard, data management, querying, simulation, experiment tracking, recommendations, reports, AI commands |
 
 ## Quick Start
 
@@ -71,6 +72,13 @@ lothal experiment evaluate <id>          Evaluate with weather normalization
 lothal recommend                         Generate ranked recommendations
 
 lothal report monthly <YYYY-MM>          Monthly efficiency report
+
+lothal ai status                         Check LLM provider connectivity
+lothal ai parse-bill <file>              Parse bill with LLM structured output
+lothal ai briefing [--date D] [--output] Generate daily briefing
+lothal ai mcp-server                     Start MCP server for reasoning agent
+lothal ai ingest-email [--once]          Poll email for utility bill PDFs
+lothal ai identify <circuit|all>         NILM device identification
 ```
 
 ## Ontology
@@ -105,11 +113,12 @@ Recommendation ── Site, optionally Device
 
 ## Database
 
-PostgreSQL 17 + TimescaleDB. Three migrations:
+PostgreSQL 17 + TimescaleDB. Four migrations:
 
 1. **Core ontology** — 14 relational tables with UUID PKs
 2. **Time-series** — hypertables for readings and weather, continuous aggregates (hourly/daily rollups)
 3. **Experiments** — hypotheses, interventions, experiments, recommendations
+4. **AI layer** — bill parse provenance, daily briefings, NILM device labels, email ingest log
 
 Default port is 5433 (avoids conflict with other local Postgres instances).
 

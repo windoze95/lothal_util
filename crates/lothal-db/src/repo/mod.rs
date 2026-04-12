@@ -1,3 +1,4 @@
+pub mod ai;
 pub mod bill;
 pub mod device;
 pub mod experiment;
