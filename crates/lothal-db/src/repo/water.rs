@@ -6,6 +6,8 @@ use lothal_core::ontology::water::{
     CoverType, Pool, SepticSystem, WaterFlow, WaterSource, WaterSourceKind,
 };
 use lothal_core::units::{Gallons, SquareFeet, Usd};
+use lothal_ontology::indexer;
+use lothal_ontology::{Describe, EventSpec, LinkSpec, ObjectRef};
 
 // ---------------------------------------------------------------------------
 // WaterSource
@@ -77,6 +79,7 @@ fn water_source_from_row(row: &sqlx::postgres::PgRow) -> WaterSource {
 // ---------------------------------------------------------------------------
 
 pub async fn insert_pool(pool: &PgPool, entity: &Pool) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
     sqlx::query(
         r#"INSERT INTO pools
                (id, site_id, name, volume_gallons, surface_area_sqft,
@@ -96,8 +99,26 @@ pub async fn insert_pool(pool: &PgPool, entity: &Pool) -> Result<(), sqlx::Error
     .bind(&entity.notes)
     .bind(entity.created_at)
     .bind(entity.updated_at)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+
+    indexer::upsert_object(&mut tx, entity).await?;
+    indexer::upsert_link(
+        &mut tx,
+        LinkSpec::new(
+            "contained_in",
+            ObjectRef::new(Pool::KIND, entity.id),
+            ObjectRef::new("site", entity.site_id),
+        ),
+    )
+    .await?;
+    indexer::emit_event(
+        &mut tx,
+        EventSpec::record_registered(entity, "repo:pool"),
+    )
+    .await?;
+
+    tx.commit().await?;
     Ok(())
 }
 

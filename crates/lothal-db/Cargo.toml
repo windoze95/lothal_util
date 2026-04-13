@@ -8,6 +8,7 @@ authors.workspace = true
 
 [dependencies]
 lothal-core = { workspace = true }
+lothal-ontology = { workspace = true }
 sqlx = { workspace = true }
 tokio = { workspace = true }
 chrono = { workspace = true }

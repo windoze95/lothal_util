@@ -3,12 +3,15 @@ use uuid::Uuid;
 
 use lothal_core::ontology::garden::{BedType, CompostPile, GardenBed, Planting};
 use lothal_core::units::{CubicFeet, Gallons, Pounds, SquareFeet};
+use lothal_ontology::indexer;
+use lothal_ontology::{Describe, EventSpec, LinkSpec, ObjectRef};
 
 // ---------------------------------------------------------------------------
 // GardenBed
 // ---------------------------------------------------------------------------
 
 pub async fn insert_garden_bed(pool: &PgPool, bed: &GardenBed) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
     sqlx::query(
         r#"INSERT INTO garden_beds
                (id, site_id, property_zone_id, name, area_sqft, bed_type,
@@ -25,8 +28,26 @@ pub async fn insert_garden_bed(pool: &PgPool, bed: &GardenBed) -> Result<(), sql
     .bind(bed.irrigation_source_id)
     .bind(bed.created_at)
     .bind(bed.updated_at)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+
+    indexer::upsert_object(&mut tx, bed).await?;
+    indexer::upsert_link(
+        &mut tx,
+        LinkSpec::new(
+            "contained_in",
+            ObjectRef::new(GardenBed::KIND, bed.id),
+            ObjectRef::new("site", bed.site_id),
+        ),
+    )
+    .await?;
+    indexer::emit_event(
+        &mut tx,
+        EventSpec::record_registered(bed, "repo:garden_bed"),
+    )
+    .await?;
+
+    tx.commit().await?;
     Ok(())
 }
 

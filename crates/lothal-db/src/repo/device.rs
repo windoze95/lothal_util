@@ -4,12 +4,15 @@ use uuid::Uuid;
 use lothal_core::ontology::circuit::Circuit;
 use lothal_core::ontology::device::{Device, DeviceKind};
 use lothal_core::units::{Usd, Watts};
+use lothal_ontology::indexer;
+use lothal_ontology::{Describe, EventSpec, LinkSpec, ObjectRef};
 
 // ---------------------------------------------------------------------------
 // Device
 // ---------------------------------------------------------------------------
 
 pub async fn insert_device(pool: &PgPool, device: &Device) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
     sqlx::query(
         r#"INSERT INTO devices (id, structure_id, zone_id, circuit_id, name, kind,
                                 make, model, nameplate_watts, estimated_daily_hours,
@@ -33,8 +36,26 @@ pub async fn insert_device(pool: &PgPool, device: &Device) -> Result<(), sqlx::E
     .bind(&device.notes)
     .bind(device.created_at)
     .bind(device.updated_at)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+
+    indexer::upsert_object(&mut tx, device).await?;
+    indexer::upsert_link(
+        &mut tx,
+        LinkSpec::new(
+            "contained_in",
+            ObjectRef::new(Device::KIND, device.id),
+            ObjectRef::new("structure", device.structure_id),
+        ),
+    )
+    .await?;
+    indexer::emit_event(
+        &mut tx,
+        EventSpec::record_registered(device, "repo:device"),
+    )
+    .await?;
+
+    tx.commit().await?;
     Ok(())
 }
 
@@ -101,6 +122,7 @@ fn device_from_row(row: &sqlx::postgres::PgRow) -> Device {
 // ---------------------------------------------------------------------------
 
 pub async fn insert_circuit(pool: &PgPool, circuit: &Circuit) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
     sqlx::query(
         r#"INSERT INTO circuits (id, panel_id, breaker_number, label, amperage,
                                  is_double_pole, device_id, created_at, updated_at)
@@ -115,8 +137,32 @@ pub async fn insert_circuit(pool: &PgPool, circuit: &Circuit) -> Result<(), sqlx
     .bind(circuit.device_id)
     .bind(circuit.created_at)
     .bind(circuit.updated_at)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+
+    indexer::upsert_object(&mut tx, circuit).await?;
+    // Circuit's only FK is `panel_id`; `Panel` has no `Describe` impl, so we
+    // do not emit a `contained_in` link here. If a circuit is bound to a
+    // device, link `powers` from circuit to device to capture the electrical
+    // relationship.
+    if let Some(device_id) = circuit.device_id {
+        indexer::upsert_link(
+            &mut tx,
+            LinkSpec::new(
+                "powers",
+                ObjectRef::new(Circuit::KIND, circuit.id),
+                ObjectRef::new("device", device_id),
+            ),
+        )
+        .await?;
+    }
+    indexer::emit_event(
+        &mut tx,
+        EventSpec::record_registered(circuit, "repo:circuit"),
+    )
+    .await?;
+
+    tx.commit().await?;
     Ok(())
 }
 

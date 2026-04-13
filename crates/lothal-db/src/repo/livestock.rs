@@ -6,12 +6,15 @@ use lothal_core::ontology::livestock::{
     Flock, FlockStatus, LivestockEventKind, LivestockLog, Paddock,
 };
 use lothal_core::units::Usd;
+use lothal_ontology::indexer;
+use lothal_ontology::{Describe, EventSpec, LinkSpec, ObjectRef};
 
 // ---------------------------------------------------------------------------
 // Flock
 // ---------------------------------------------------------------------------
 
 pub async fn insert_flock(pool: &PgPool, flock: &Flock) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
     sqlx::query(
         r#"INSERT INTO flocks
                (id, site_id, name, breed, bird_count, coop_zone_id,
@@ -29,8 +32,26 @@ pub async fn insert_flock(pool: &PgPool, flock: &Flock) -> Result<(), sqlx::Erro
     .bind(&flock.notes)
     .bind(flock.created_at)
     .bind(flock.updated_at)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+
+    indexer::upsert_object(&mut tx, flock).await?;
+    indexer::upsert_link(
+        &mut tx,
+        LinkSpec::new(
+            "contained_in",
+            ObjectRef::new(Flock::KIND, flock.id),
+            ObjectRef::new("site", flock.site_id),
+        ),
+    )
+    .await?;
+    indexer::emit_event(
+        &mut tx,
+        EventSpec::record_registered(flock, "repo:flock"),
+    )
+    .await?;
+
+    tx.commit().await?;
     Ok(())
 }
 
@@ -64,6 +85,7 @@ pub async fn list_flocks_by_site(
 }
 
 pub async fn update_flock(pool: &PgPool, flock: &Flock) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
     sqlx::query(
         r#"UPDATE flocks SET
                name = $2, breed = $3, bird_count = $4, coop_zone_id = $5,
@@ -78,8 +100,12 @@ pub async fn update_flock(pool: &PgPool, flock: &Flock) -> Result<(), sqlx::Erro
     .bind(flock.status.to_string())
     .bind(&flock.notes)
     .bind(flock.updated_at)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+
+    indexer::upsert_object(&mut tx, flock).await?;
+
+    tx.commit().await?;
     Ok(())
 }
 

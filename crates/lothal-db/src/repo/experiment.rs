@@ -7,6 +7,8 @@ use lothal_core::ontology::experiment::{
 };
 use lothal_core::temporal::DateRange;
 use lothal_core::units::Usd;
+use lothal_ontology::indexer;
+use lothal_ontology::{Describe, EventSpec, LinkSpec, ObjectRef};
 
 // ---------------------------------------------------------------------------
 // Hypothesis
@@ -92,6 +94,7 @@ pub async fn insert_intervention(pool: &PgPool, i: &Intervention) -> Result<(), 
 // ---------------------------------------------------------------------------
 
 pub async fn insert_experiment(pool: &PgPool, e: &Experiment) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
     sqlx::query(
         r#"INSERT INTO experiments
                (id, site_id, hypothesis_id, intervention_id,
@@ -115,8 +118,30 @@ pub async fn insert_experiment(pool: &PgPool, e: &Experiment) -> Result<(), sqlx
     .bind(&e.notes)
     .bind(e.created_at)
     .bind(e.updated_at)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+
+    indexer::upsert_object(&mut tx, e).await?;
+    // `Experiment` targets the site it runs in; finer-grained `targets` edges
+    // to a device or circuit would have to be resolved via the intervention
+    // row (which is not guaranteed to be inserted yet and has no Describe
+    // impl of its own).
+    indexer::upsert_link(
+        &mut tx,
+        LinkSpec::new(
+            "targets",
+            ObjectRef::new(Experiment::KIND, e.id),
+            ObjectRef::new("site", e.site_id),
+        ),
+    )
+    .await?;
+    indexer::emit_event(
+        &mut tx,
+        EventSpec::record_registered(e, "repo:experiment"),
+    )
+    .await?;
+
+    tx.commit().await?;
     Ok(())
 }
 
@@ -154,6 +179,7 @@ pub async fn list_experiments_by_site(
 }
 
 pub async fn update_experiment(pool: &PgPool, e: &Experiment) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
     sqlx::query(
         r#"UPDATE experiments SET
                status = $2, actual_savings_pct = $3, actual_savings_usd = $4,
@@ -167,8 +193,12 @@ pub async fn update_experiment(pool: &PgPool, e: &Experiment) -> Result<(), sqlx
     .bind(e.confidence)
     .bind(&e.notes)
     .bind(e.updated_at)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+
+    indexer::upsert_object(&mut tx, e).await?;
+
+    tx.commit().await?;
     Ok(())
 }
 

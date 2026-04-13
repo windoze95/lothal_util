@@ -1460,6 +1460,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "lothal-core",
+ "lothal-ontology",
  "serde_json",
  "sqlx",
  "thiserror 2.0.18",
