@@ -1,8 +1,10 @@
 use crate::IngestError;
 use chrono::{DateTime, Utc};
-use lothal_core::{Reading, ReadingKind, ReadingSource};
+use lothal_core::{Reading, ReadingEvent, ReadingKind, ReadingSource};
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
 use serde::Deserialize;
+use sqlx::PgPool;
+use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
 
 /// Configuration for connecting to an MQTT broker.
@@ -121,6 +123,50 @@ fn parse_broker_url(url: &str) -> Result<(String, u16), IngestError> {
     } else {
         Ok((stripped.to_string(), 1883))
     }
+}
+
+/// Connect to the MQTT broker, subscribe to configured topics, insert parsed
+/// readings directly into the database, and optionally broadcast a
+/// [`ReadingEvent`] to live subscribers (e.g. WebSocket clients).
+///
+/// Useful for an in-process ingester (e.g. the web server) that wants to
+/// both persist and republish each observation without an intermediate
+/// mpsc channel.
+///
+/// Runs in a loop, reconnecting on disconnect. Returns on unrecoverable
+/// errors or when cancelled.
+pub async fn run_subscriber(
+    pool: PgPool,
+    event_tx: Option<broadcast::Sender<ReadingEvent>>,
+    config: MqttConfig,
+    mappings: Vec<SensorMapping>,
+) -> Result<(), IngestError> {
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<Reading>(256);
+
+    // Spawn the low-level subscriber that only parses and forwards.
+    let sub_handle = tokio::spawn(async move {
+        if let Err(e) = run_mqtt_subscriber(config, mappings, tx).await {
+            error!(error = %e, "MQTT subscriber exited with error");
+        }
+    });
+
+    // Persist readings and broadcast `ReadingEvent`s to any live subscribers.
+    while let Some(reading) = rx.recv().await {
+        match lothal_db::reading::insert_reading(&pool, &reading).await {
+            Ok(()) => {
+                if let Some(tx) = event_tx.as_ref() {
+                    // Ignore send errors: no subscribers is fine.
+                    let _ = tx.send(ReadingEvent::from_reading(&reading));
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, "failed to insert reading");
+            }
+        }
+    }
+
+    sub_handle.abort();
+    Ok(())
 }
 
 /// Connect to the MQTT broker, subscribe to configured topics, and forward

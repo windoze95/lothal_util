@@ -14,6 +14,7 @@ path = "src/main.rs"
 lothal-core = { workspace = true }
 lothal-db = { workspace = true }
 lothal-engine = { workspace = true }
+lothal-ingest = { workspace = true }
 lothal-ai = { workspace = true }
 lothal-ontology = { workspace = true }
 

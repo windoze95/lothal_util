@@ -25,6 +25,14 @@
     <!-- Properties panel -->
     <div class="bg-[#1a1d27] rounded-xl p-6 border border-[#2e3346]">
       <h3 class="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider mb-4">Properties</h3>
+      <div id="live-reading"
+           class="hidden mb-4 rounded-lg border border-[#4f9cf7]/40 bg-[#4f9cf7]/10 px-3 py-2 text-xs text-[#e8eaed]">
+        <span class="text-[#8b8fa3]">Live:</span>
+        <span id="live-reading-kind"></span> =
+        <span id="live-reading-value" class="font-mono"></span>
+        <span class="text-[#555a6e]"> @ </span>
+        <span id="live-reading-time" class="text-[#8b8fa3]"></span>
+      </div>
       {% if properties.is_empty() %}
       <p class="text-sm text-[#555a6e]">No properties recorded.</p>
       {% else %}
@@ -155,5 +163,30 @@
       node.attr('transform', function (d) { return 'translate(' + d.x + ',' + d.y + ')'; });
     });
   }
+</script>
+<script>
+  // Live reading widget: subscribe to the WS feed filtered by this entity's URI.
+  (function () {
+    var uri = 'lothal://{{ kind }}/{{ id }}';
+    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    var url = proto + '//' + location.host + '/ws/readings?uri=' + encodeURIComponent(uri);
+    var widget = document.getElementById('live-reading');
+    if (!widget) return;
+    var hideTimer = null;
+    var ws;
+    try { ws = new WebSocket(url); } catch (_) { return; }
+    ws.onmessage = function (ev) {
+      try {
+        var d = JSON.parse(ev.data);
+        document.getElementById('live-reading-kind').textContent = d.kind;
+        document.getElementById('live-reading-value').textContent = (+d.value).toFixed(2);
+        document.getElementById('live-reading-time').textContent = new Date(d.time).toLocaleTimeString();
+        widget.classList.remove('hidden');
+        if (hideTimer) clearTimeout(hideTimer);
+        hideTimer = setTimeout(function () { widget.classList.add('hidden'); }, 10000);
+      } catch (_) {}
+    };
+    ws.onerror = function () { widget.classList.add('hidden'); };
+  })();
 </script>
 {% endblock %}

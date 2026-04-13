@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use lothal_core::ReadingEvent;
 use sqlx::PgPool;
 use tokio::sync::broadcast;
 
@@ -7,8 +8,9 @@ use tokio::sync::broadcast;
 #[derive(Clone)]
 pub struct AppState {
     pub pool: PgPool,
-    /// Broadcast channel for pushing JSON-serialized readings to WebSocket clients.
-    pub readings_tx: broadcast::Sender<String>,
+    /// Broadcast channel for pushing live [`ReadingEvent`]s to WebSocket
+    /// clients. Published to by the in-process MQTT ingester (if enabled).
+    pub readings_tx: broadcast::Sender<ReadingEvent>,
     /// Registry of ontology actions invocable from the web UI.
     pub registry: Arc<lothal_ontology::ActionRegistry>,
 }
