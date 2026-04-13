@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}{{ display_name }}{% endblock %}
+{% block content %}
+<div class="space-y-6">
+
+  <!-- Breadcrumb -->
+  <nav class="flex items-center gap-2 text-sm text-[#8b8fa3]">
+    <a href="/" class="hover:text-[#e8eaed]">Lothal</a>
+    <span class="text-[#555a6e]">/</span>
+    <span class="text-[#8b8fa3]">{{ kind }}</span>
+    <span class="text-[#555a6e]">/</span>
+    <span class="text-white font-medium">{{ display_name }}</span>
+  </nav>
+
+  <!-- Header -->
+  <div class="flex items-start justify-between flex-wrap gap-3">
+    <div>
+      <h2 class="text-xl font-semibold text-white">{{ display_name }}</h2>
+      <p class="text-xs text-[#555a6e] mt-1 font-mono">{{ kind }} &middot; {{ id }}</p>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+    <!-- Properties panel -->
+    <div class="bg-[#1a1d27] rounded-xl p-6 border border-[#2e3346]">
+      <h3 class="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider mb-4">Properties</h3>
+      {% if properties.is_empty() %}
+      <p class="text-sm text-[#555a6e]">No properties recorded.</p>
+      {% else %}
+      <dl class="divide-y divide-[#2e3346]">
+        {% for row in properties %}
+        <div class="py-2.5 grid grid-cols-3 gap-3">
+          <dt class="text-xs text-[#8b8fa3] uppercase tracking-wider">{{ row.key }}</dt>
+          <dd class="col-span-2 text-sm text-[#e8eaed] break-words">
+            {% if row.nested %}
+            <pre class="bg-[#0f1117] rounded-md p-3 text-xs overflow-x-auto border border-[#2e3346]">{{ row.value }}</pre>
+            {% else %}
+            {{ row.value }}
+            {% endif %}
+          </dd>
+        </div>
+        {% endfor %}
+      </dl>
+      {% endif %}
+    </div>
+
+    <!-- Timeline panel -->
+    <div class="bg-[#1a1d27] rounded-xl p-6 border border-[#2e3346]">
+      <h3 class="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider mb-4">Timeline</h3>
+      <div hx-get="/e/{{ kind }}/{{ id }}/timeline" hx-trigger="load" hx-swap="innerHTML"
+           class="text-sm text-[#555a6e]">Loading&hellip;</div>
+    </div>
+
+    <!-- Graph panel -->
+    <div class="bg-[#1a1d27] rounded-xl p-6 border border-[#2e3346] lg:col-span-2">
+      <h3 class="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider mb-4">Neighbor Graph</h3>
+      <svg id="neighbor-graph" viewBox="0 0 800 360"
+           class="w-full rounded-lg bg-[#0f1117] border border-[#2e3346]"
+           style="height: 360px">
+      </svg>
+    </div>
+
+    <!-- Actions panel -->
+    <div class="bg-[#1a1d27] rounded-xl p-6 border border-[#2e3346] lg:col-span-2">
+      <h3 class="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider mb-4">Actions</h3>
+      {% if applicable_actions.is_empty() %}
+      <p class="text-sm text-[#555a6e]">No actions are applicable to this object kind.</p>
+      {% else %}
+      <div class="flex flex-wrap gap-3">
+        {% for action_name in applicable_actions %}
+        <div class="flex flex-col gap-2">
+          <button
+            type="button"
+            hx-post="/e/{{ kind }}/{{ id }}/actions/{{ action_name }}"
+            hx-ext="json-enc"
+            hx-vals='{}'
+            hx-target="#action-result-{{ action_name }}"
+            hx-swap="innerHTML"
+            class="px-3 py-2 rounded-lg bg-[#232736] border border-[#2e3346] text-sm text-[#e8eaed] hover:border-[#4f9cf7] hover:bg-[#2e3346] transition-colors">
+            {{ action_name }}
+          </button>
+          <div id="action-result-{{ action_name }}" class="min-h-[1rem]"></div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- d3 neighbor-graph renderer. CDN-loaded on the client; no server JS. -->
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js" defer></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    fetch('/e/{{ kind }}/{{ id }}/graph')
+      .then(function (r) { return r.json(); })
+      .then(function (g) { renderNeighborGraph(g); })
+      .catch(function () { /* leave svg empty */ });
+  });
+
+  function renderNeighborGraph(graph) {
+    if (typeof d3 === 'undefined') { return; }
+    var svg = d3.select('#neighbor-graph');
+    svg.selectAll('*').remove();
+    var width = 800, height = 360;
+
+    var nodes = graph.nodes.map(function (n) { return Object.assign({}, n); });
+    var links = graph.links.map(function (l) { return Object.assign({}, l); });
+
+    var sim = d3.forceSimulation(nodes)
+      .force('link', d3.forceLink(links).id(function (d) { return d.id; }).distance(90))
+      .force('charge', d3.forceManyBody().strength(-220))
+      .force('center', d3.forceCenter(width / 2, height / 2));
+
+    var link = svg.append('g')
+      .attr('stroke', '#2e3346')
+      .attr('stroke-width', 1.2)
+      .selectAll('line').data(links).enter().append('line');
+
+    var linkLabel = svg.append('g')
+      .attr('fill', '#555a6e').attr('font-size', 10)
+      .selectAll('text').data(links).enter().append('text')
+      .text(function (d) { return d.kind; });
+
+    var node = svg.append('g')
+      .selectAll('g').data(nodes).enter().append('g')
+      .style('cursor', 'pointer')
+      .on('click', function (_, d) {
+        // "kind:uuid" id format comes from the server.
+        var parts = d.id.split(':');
+        if (parts.length === 2) { window.location.href = '/e/' + parts[0] + '/' + parts[1]; }
+      });
+
+    node.append('circle')
+      .attr('r', function (d) { return d.root ? 11 : 8; })
+      .attr('fill', function (d) { return d.root ? '#4f9cf7' : '#232736'; })
+      .attr('stroke', function (d) { return d.root ? '#4f9cf7' : '#555a6e'; })
+      .attr('stroke-width', 1.5);
+
+    node.append('text')
+      .attr('x', 14).attr('y', 4)
+      .attr('fill', '#e8eaed').attr('font-size', 12)
+      .text(function (d) { return d.name + ' (' + d.kind + ')'; });
+
+    sim.on('tick', function () {
+      link
+        .attr('x1', function (d) { return d.source.x; })
+        .attr('y1', function (d) { return d.source.y; })
+        .attr('x2', function (d) { return d.target.x; })
+        .attr('y2', function (d) { return d.target.y; });
+      linkLabel
+        .attr('x', function (d) { return (d.source.x + d.target.x) / 2; })
+        .attr('y', function (d) { return (d.source.y + d.target.y) / 2; });
+      node.attr('transform', function (d) { return 'translate(' + d.x + ',' + d.y + ')'; });
+    });
+  }
+</script>
+{% endblock %}

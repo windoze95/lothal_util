@@ -78,6 +78,41 @@ pub async fn update_site_boundary(
     Ok(result.rows_affected())
 }
 
+/// Read-only accessor for the GeoJSON `boundary` column of a site.
+pub async fn get_site_boundary(
+    pool: &PgPool,
+    site_id: Uuid,
+) -> Result<Option<serde_json::Value>, sqlx::Error> {
+    let row: Option<(Option<serde_json::Value>,)> =
+        sqlx::query_as("SELECT boundary FROM sites WHERE id = $1")
+            .bind(site_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.and_then(|(b,)| b))
+}
+
+/// Read-only accessor: `(structure_id, name, footprint)` for every structure on a site.
+///
+/// Rows with a `NULL` footprint are skipped — callers that need the full
+/// structure list should use [`get_structures_by_site`] and join manually.
+pub async fn list_structure_footprints(
+    pool: &PgPool,
+    site_id: Uuid,
+) -> Result<Vec<(Uuid, String, serde_json::Value)>, sqlx::Error> {
+    let rows: Vec<(Uuid, String, Option<serde_json::Value>)> = sqlx::query_as(
+        "SELECT id, name, footprint FROM structures
+         WHERE site_id = $1 AND footprint IS NOT NULL
+         ORDER BY name",
+    )
+    .bind(site_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|(id, name, footprint)| footprint.map(|f| (id, name, f)))
+        .collect())
+}
+
 pub async fn update_site(pool: &PgPool, site: &Site) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
     sqlx::query(
