@@ -1434,6 +1434,7 @@ dependencies = [
  "lothal-db",
  "lothal-engine",
  "lothal-ingest",
+ "lothal-ontology",
  "serde",
  "serde_json",
  "sqlx",

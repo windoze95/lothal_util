@@ -16,6 +16,7 @@ lothal-db = { workspace = true }
 lothal-ingest = { workspace = true }
 lothal-engine = { workspace = true }
 lothal-ai = { workspace = true }
+lothal-ontology = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

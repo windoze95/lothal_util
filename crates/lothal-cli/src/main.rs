@@ -2,6 +2,8 @@ mod commands;
 
 use clap::{Parser, Subcommand};
 
+use commands::ontology::OntologyCommands;
+
 #[derive(Parser)]
 #[command(name = "lothal", about = "Home efficiency ontology system")]
 struct Cli {
@@ -89,6 +91,11 @@ enum Commands {
     Geometry {
         #[command(subcommand)]
         command: GeometryCommands,
+    },
+    /// Ontology maintenance (backfill, repair, etc.)
+    Ontology {
+        #[command(subcommand)]
+        cmd: OntologyCommands,
     },
     /// Run the scheduler daemon (weather pull, email ingest, anomaly sweep, daily briefing)
     Daemon,
@@ -539,6 +546,10 @@ async fn main() -> anyhow::Result<()> {
                 commands::geometry::import(&pool, &site, &file).await?;
             }
         },
+
+        Commands::Ontology { cmd } => {
+            commands::ontology::run(&pool, cmd).await?;
+        }
 
         Commands::Daemon => {
             commands::daemon::run(pool).await?;
