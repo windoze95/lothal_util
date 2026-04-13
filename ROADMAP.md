@@ -5,7 +5,7 @@
 6-crate Rust workspace expanded from "home efficiency" to full **property operations ontology**. The house is one subsystem; the lot, pool, water cycle, chickens, garden, compost, and weather are the rest. All joined in one schema so cross-system questions are answerable.
 
 - lothal-core: 16 ontology modules, 20+ entity types, 50+ enum types, 12 strongly-typed units
-- lothal-db: 10 PostgreSQL/TimescaleDB migrations, 13 repository modules
+- lothal-db: single baseline schema (PostgreSQL 17 + TimescaleDB), 13 repository modules
 - lothal-ingest: bill parsers (OG&E, ONG, Guthrie), MQTT, NWS, Flume, Ecobee
 - lothal-engine: energy + water baselines, 8 simulation scenarios, 13 recommendation templates, experiment evaluator
 - lothal-ai: LLM bill parsing, property operations daily briefings, MCP reasoning agent (14 tools), NILM
@@ -120,7 +120,7 @@ Emporia gives per-circuit watts but doesn't know what's running. Classical signa
 
 ## Phase 2.5: Property Operations Expansion -- IMPLEMENTED
 
-Expanded the ontology from "home efficiency" to "property operations". Six new migrations, six new core entity modules, five new repo modules, four new CLI command groups, expanded engine/AI/MCP.
+Expanded the ontology from "home efficiency" to "property operations". Six new core entity modules, five new repo modules, four new CLI command groups, expanded engine/AI/MCP.
 
 ### New Subsystems
 - **Property spatial model** — PropertyZone (13 kinds), Constraint (7 kinds), Tree with shade/cooling analysis

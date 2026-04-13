@@ -188,24 +188,7 @@ Every domain entity implements `Describe` (kind, id, display_name, properties). 
 
 ## Database
 
-PostgreSQL 17 + TimescaleDB. Sixteen migrations:
-
-1. **Core ontology** — relational tables with UUID PKs
-2. **Time-series** — hypertables for readings and weather, continuous aggregates (hourly/daily)
-3. **Experiments** — hypotheses, interventions, experiments, recommendations
-4. **AI layer** — bill parse provenance, daily briefings, NILM labels, email ingest log
-5. **Property zones** — zones, constraints
-6. **Water systems** — sources, pools, septic, water flows
-7. **Livestock** — flocks, paddocks, logs
-8. **Garden** — beds, plantings, compost
-9. **Resource flows** — cross-system resource flow hypertable
-10. **Microclimate** — weather source tracking
-11. **Scheduler runs** — daemon task execution log
-12. **Anomaly alerts** — detected deviations from baseline
-13. **Drop trees** — removes the deprecated trees table
-14. **Geometry** — GeoJSON boundary/footprint/shape columns on sites, structures, zones
-15. **Ontology layer** — objects, links, events (hypertable), action_runs
-16. **Experiment baseline** — JSONB baseline snapshot on experiments
+PostgreSQL 17 + TimescaleDB. Schema lives in a single baseline migration (`migrations/001_baseline.sql`) applied at startup via `sqlx migrate`. It covers the full ontology in one pass: sites/structures/zones/panels/devices/circuits, utility accounts and bills, readings and weather hypertables with hourly/daily continuous aggregates, experiments and recommendations, property zones and constraints, water/livestock/garden/compost, cross-system resource flows, scheduler bookkeeping, anomaly alerts, AI-layer tables (briefings, NILM device labels, email ingest log), and the unified ontology primitives (objects, links, events, action_runs). Future schema changes land as new numbered migrations on top of this baseline.
 
 Default port is 5433 (avoids conflict with other local Postgres instances).
 
