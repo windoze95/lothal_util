@@ -6,6 +6,8 @@ use lothal_core::ontology::bill::{Bill, BillLineItem, LineItemCategory};
 use lothal_core::ontology::utility::{RateSchedule, RateTier, RateType, UtilityAccount, UtilityType};
 use lothal_core::temporal::BillingPeriod;
 use lothal_core::units::Usd;
+use lothal_ontology::indexer;
+use lothal_ontology::{Describe, EventSpec, LinkSpec, ObjectRef};
 
 // ---------------------------------------------------------------------------
 // Bill
@@ -58,6 +60,18 @@ pub async fn insert_bill(pool: &PgPool, bill: &Bill) -> Result<(), sqlx::Error> 
         .execute(&mut *tx)
         .await?;
     }
+
+    indexer::upsert_object(&mut tx, bill).await?;
+    indexer::upsert_link(
+        &mut tx,
+        LinkSpec::new(
+            "issued_by",
+            ObjectRef::new(Bill::KIND, bill.id),
+            ObjectRef::new("utility_account", bill.account_id),
+        ),
+    )
+    .await?;
+    indexer::emit_event(&mut tx, EventSpec::record_registered(bill, "repo:bill")).await?;
 
     tx.commit().await?;
     Ok(())
@@ -200,6 +214,7 @@ pub async fn insert_utility_account(
     pool: &PgPool,
     account: &UtilityAccount,
 ) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
     sqlx::query(
         r#"INSERT INTO utility_accounts (id, site_id, provider_name, utility_type,
                                          account_number, meter_id, is_active,
@@ -215,8 +230,26 @@ pub async fn insert_utility_account(
     .bind(account.is_active)
     .bind(account.created_at)
     .bind(account.updated_at)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+
+    indexer::upsert_object(&mut tx, account).await?;
+    indexer::upsert_link(
+        &mut tx,
+        LinkSpec::new(
+            "contained_in",
+            ObjectRef::new(UtilityAccount::KIND, account.id),
+            ObjectRef::new("site", account.site_id),
+        ),
+    )
+    .await?;
+    indexer::emit_event(
+        &mut tx,
+        EventSpec::record_registered(account, "repo:utility_account"),
+    )
+    .await?;
+
+    tx.commit().await?;
     Ok(())
 }
 

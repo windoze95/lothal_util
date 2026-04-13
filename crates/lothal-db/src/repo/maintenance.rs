@@ -3,6 +3,8 @@ use uuid::Uuid;
 
 use lothal_core::ontology::maintenance::{MaintenanceEvent, MaintenanceTarget, MaintenanceType};
 use lothal_core::units::Usd;
+use lothal_ontology::indexer;
+use lothal_ontology::{Describe, EventSpec, LinkSpec, ObjectRef};
 
 // ---------------------------------------------------------------------------
 // MaintenanceEvent
@@ -12,6 +14,7 @@ pub async fn insert_maintenance_event(
     pool: &PgPool,
     event: &MaintenanceEvent,
 ) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
     sqlx::query(
         r#"INSERT INTO maintenance_events
                (id, target_type, target_id, date, event_type, description,
@@ -29,8 +32,26 @@ pub async fn insert_maintenance_event(
     .bind(event.next_due)
     .bind(&event.notes)
     .bind(event.created_at)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+
+    indexer::upsert_object(&mut tx, event).await?;
+    indexer::upsert_link(
+        &mut tx,
+        LinkSpec::new(
+            "targets",
+            ObjectRef::new(MaintenanceEvent::KIND, event.id),
+            ObjectRef::new(event.target.target_type(), event.target.target_id()),
+        ),
+    )
+    .await?;
+    indexer::emit_event(
+        &mut tx,
+        EventSpec::record_registered(event, "repo:maintenance"),
+    )
+    .await?;
+
+    tx.commit().await?;
     Ok(())
 }
 

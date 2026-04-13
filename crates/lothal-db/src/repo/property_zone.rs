@@ -6,6 +6,8 @@ use lothal_core::ontology::property_zone::{
 };
 use lothal_core::ontology::site::SoilType;
 use lothal_core::units::SquareFeet;
+use lothal_ontology::indexer;
+use lothal_ontology::{Describe, EventSpec, LinkSpec, ObjectRef};
 
 // ---------------------------------------------------------------------------
 // PropertyZone
@@ -15,6 +17,7 @@ pub async fn insert_property_zone(
     pool: &PgPool,
     zone: &PropertyZone,
 ) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
     sqlx::query(
         r#"INSERT INTO property_zones
                (id, site_id, name, kind, area_sqft, sun_exposure, slope,
@@ -33,8 +36,26 @@ pub async fn insert_property_zone(
     .bind(&zone.notes)
     .bind(zone.created_at)
     .bind(zone.updated_at)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+
+    indexer::upsert_object(&mut tx, zone).await?;
+    indexer::upsert_link(
+        &mut tx,
+        LinkSpec::new(
+            "contained_in",
+            ObjectRef::new(PropertyZone::KIND, zone.id),
+            ObjectRef::new("site", zone.site_id),
+        ),
+    )
+    .await?;
+    indexer::emit_event(
+        &mut tx,
+        EventSpec::record_registered(zone, "repo:property_zone"),
+    )
+    .await?;
+
+    tx.commit().await?;
     Ok(())
 }
 
@@ -87,6 +108,7 @@ pub async fn update_property_zone(
     pool: &PgPool,
     zone: &PropertyZone,
 ) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
     sqlx::query(
         r#"UPDATE property_zones SET
                name = $2, kind = $3, area_sqft = $4, sun_exposure = $5,
@@ -104,8 +126,12 @@ pub async fn update_property_zone(
     .bind(zone.drainage.map(|d| d.to_string()))
     .bind(&zone.notes)
     .bind(zone.updated_at)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+
+    indexer::upsert_object(&mut tx, zone).await?;
+
+    tx.commit().await?;
     Ok(())
 }
 

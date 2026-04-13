@@ -4,12 +4,15 @@ use uuid::Uuid;
 use lothal_core::ontology::site::{FoundationType, Site, SoilType, Structure, Zone};
 use lothal_core::ontology::circuit::Panel;
 use lothal_core::units::{Acres, SquareFeet};
+use lothal_ontology::indexer;
+use lothal_ontology::{Describe, EventSpec, LinkSpec, ObjectRef};
 
 // ---------------------------------------------------------------------------
 // Site
 // ---------------------------------------------------------------------------
 
 pub async fn insert_site(pool: &PgPool, site: &Site) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
     sqlx::query(
         r#"INSERT INTO sites (id, address, city, state, zip, latitude, longitude,
                               lot_size, climate_zone, soil_type, created_at, updated_at)
@@ -27,8 +30,13 @@ pub async fn insert_site(pool: &PgPool, site: &Site) -> Result<(), sqlx::Error> 
     .bind(site.soil_type.map(|s| s.to_string()))
     .bind(site.created_at)
     .bind(site.updated_at)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+
+    indexer::upsert_object(&mut tx, site).await?;
+    indexer::emit_event(&mut tx, EventSpec::record_registered(site, "repo:site")).await?;
+
+    tx.commit().await?;
     Ok(())
 }
 
@@ -71,6 +79,7 @@ pub async fn update_site_boundary(
 }
 
 pub async fn update_site(pool: &PgPool, site: &Site) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
     sqlx::query(
         r#"UPDATE sites SET address = $2, city = $3, state = $4, zip = $5,
                             latitude = $6, longitude = $7, lot_size = $8,
@@ -88,8 +97,12 @@ pub async fn update_site(pool: &PgPool, site: &Site) -> Result<(), sqlx::Error> 
     .bind(&site.climate_zone)
     .bind(site.soil_type.map(|s| s.to_string()))
     .bind(site.updated_at)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+
+    indexer::upsert_object(&mut tx, site).await?;
+
+    tx.commit().await?;
     Ok(())
 }
 
@@ -117,6 +130,7 @@ fn site_from_row(row: &sqlx::postgres::PgRow) -> Site {
 // ---------------------------------------------------------------------------
 
 pub async fn insert_structure(pool: &PgPool, structure: &Structure) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
     sqlx::query(
         r#"INSERT INTO structures (id, site_id, name, year_built, square_footage, stories,
                                    foundation_type, has_pool, pool_gallons, has_septic,
@@ -135,8 +149,26 @@ pub async fn insert_structure(pool: &PgPool, structure: &Structure) -> Result<()
     .bind(structure.has_septic)
     .bind(structure.created_at)
     .bind(structure.updated_at)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+
+    indexer::upsert_object(&mut tx, structure).await?;
+    indexer::upsert_link(
+        &mut tx,
+        LinkSpec::new(
+            "contained_in",
+            ObjectRef::new(Structure::KIND, structure.id),
+            ObjectRef::new("site", structure.site_id),
+        ),
+    )
+    .await?;
+    indexer::emit_event(
+        &mut tx,
+        EventSpec::record_registered(structure, "repo:structure"),
+    )
+    .await?;
+
+    tx.commit().await?;
     Ok(())
 }
 
