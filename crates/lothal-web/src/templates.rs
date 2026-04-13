@@ -73,69 +73,25 @@ pub struct BillSummary {
     pub daily_rate: f64,
 }
 
-/// Device summary for energy page.
+/// One recent ontology event displayed in the Pulse events stream.
 #[derive(Debug, Clone, Serialize)]
-pub struct DeviceSummary {
-    pub name: String,
+pub struct EventListEntry {
+    pub time: String,
     pub kind: String,
-    pub est_monthly_kwh: f64,
+    pub summary: String,
+    pub severity: Option<String>,
+    /// Link to the entity page of the first subject, when present.
+    pub href: Option<String>,
 }
 
-/// Circuit summary for energy page.
+/// An inline action card rendered on the Pulse page. Each card posts to
+/// `/e/site/{site_id}/actions/{name}` and targets an htmx result slot.
 #[derive(Debug, Clone, Serialize)]
-pub struct CircuitSummary {
+pub struct PulseActionCard {
+    pub name: String,
     pub label: String,
-    pub kwh_today: f64,
-    pub pct_of_total: f64,
-}
-
-/// Pool status for water page.
-#[derive(Debug, Clone, Serialize)]
-pub struct PoolDisplay {
-    pub name: String,
-    pub volume_gallons: f64,
-    pub pump_runtime_hours: Option<f64>,
-    pub last_chlorine_ppm: Option<f64>,
-    pub last_ph: Option<f64>,
-    pub last_temp_f: Option<f64>,
-}
-
-/// Septic status for water page.
-#[derive(Debug, Clone, Serialize)]
-pub struct SepticDisplay {
-    pub tank_capacity_gallons: f64,
-    pub days_until_pump: i64,
-    pub is_overdue: bool,
-    pub daily_load_estimate: Option<f64>,
-}
-
-/// Property zone for the map.
-#[derive(Debug, Clone, Serialize)]
-pub struct ZoneDisplay {
-    pub id: String,
-    pub name: String,
-    pub kind: String,
-    pub area_sqft: Option<f64>,
-}
-
-/// Flock summary for land page.
-#[derive(Debug, Clone, Serialize)]
-pub struct FlockDisplay {
-    pub name: String,
-    pub breed: String,
-    pub bird_count: i32,
-    pub eggs_today: f64,
-    pub feed_today_lbs: f64,
-    pub status: String,
-}
-
-/// Garden bed summary for land page.
-#[derive(Debug, Clone, Serialize)]
-pub struct GardenBedDisplay {
-    pub name: String,
-    pub bed_type: String,
-    pub area_sqft: Option<f64>,
-    pub active_plantings: i32,
+    pub description: String,
+    pub site_id: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -153,59 +109,10 @@ pub struct PulsePage {
     pub alerts: Vec<Alert>,
     pub experiments: Vec<ExperimentSummary>,
     pub top_recommendation: Option<RecommendationSummary>,
-}
-
-#[derive(Template, WebTemplate)]
-#[template(path = "pages/energy.html")]
-pub struct EnergyPage {
-    pub active_page: String,
-    pub site_name: String,
-    pub total_kwh_today: f64,
-    pub estimated_cost_today: f64,
-    pub circuits: Vec<CircuitSummary>,
-    pub usage_chart: String,
-    pub circuit_chart: String,
-    pub baseline_r_squared: Option<f64>,
-    pub baseline_slope: Option<f64>,
-    pub baseline_intercept: Option<f64>,
-}
-
-#[derive(Template, WebTemplate)]
-#[template(path = "pages/water.html")]
-pub struct WaterPage {
-    pub active_page: String,
-    pub site_name: String,
-    pub pools: Vec<PoolDisplay>,
-    pub septic: Option<SepticDisplay>,
-    pub has_water_data: bool,
-}
-
-#[derive(Template, WebTemplate)]
-#[template(path = "pages/property.html")]
-pub struct PropertyPage {
-    pub active_page: String,
-    pub site_name: String,
-    pub zones: Vec<ZoneDisplay>,
-}
-
-#[derive(Template, WebTemplate)]
-#[template(path = "pages/land.html")]
-pub struct LandPage {
-    pub active_page: String,
-    pub site_name: String,
-    pub flocks: Vec<FlockDisplay>,
-    pub garden_beds: Vec<GardenBedDisplay>,
-    pub has_livestock: bool,
-    pub has_garden: bool,
-}
-
-#[derive(Template, WebTemplate)]
-#[template(path = "pages/lab.html")]
-pub struct LabPage {
-    pub active_page: String,
-    pub site_name: String,
-    pub recommendations: Vec<RecommendationSummary>,
-    pub experiments: Vec<ExperimentSummary>,
+    pub recent_events: Vec<EventListEntry>,
+    pub action_cards: Vec<PulseActionCard>,
+    /// `/e/site/<id>` when a site exists; used by the Site overview link.
+    pub site_href: Option<String>,
 }
 
 #[derive(Template, WebTemplate)]
@@ -222,25 +129,11 @@ pub struct BillsPage {
 // ---------------------------------------------------------------------------
 
 #[derive(Template, WebTemplate)]
-#[template(path = "partials/stat_card.html")]
-pub struct StatCardPartial {
-    pub card: StatCard,
-}
-
-#[derive(Template, WebTemplate)]
 #[template(path = "partials/chart.html")]
 pub struct ChartPartial {
     pub id: String,
     pub config_json: String,
     pub height: String,
-}
-
-#[derive(Template, WebTemplate)]
-#[template(path = "partials/empty_state.html")]
-pub struct EmptyStatePartial {
-    pub icon: &'static str,
-    pub title: &'static str,
-    pub message: &'static str,
 }
 
 // ---------------------------------------------------------------------------
