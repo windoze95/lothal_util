@@ -1,24 +1,25 @@
 # lothal_util
 
-Property operations ontology system. Models an entire property as a graph of physical entities (site, structures, zones, devices, circuits), land areas (property zones, trees, constraints), water systems (sources, pools, septic), biological subsystems (flocks, paddocks, garden beds, compost), financial entities (utility accounts, rate schedules, bills), time-series data (sensor readings, weather observations), and cross-system resource flows. Computes weather-normalized baselines for energy and water, runs "what if" simulations, tracks experiments, and generates property-wide efficiency recommendations.
+Property operations ontology system. Models an entire property as a graph of physical entities (site, structures, zones, devices, circuits), land areas (property zones), water systems (sources, pools, septic), biological subsystems (flocks, garden beds, compost), financial entities (utility accounts, rate schedules, bills), time-series data (sensor readings, weather observations), and cross-system resource flows. Computes weather-normalized baselines for energy and water, tracks experiments, and generates property-wide efficiency recommendations.
 
-The house is one subsystem. The pool, land, trees, chickens, water cycle, and weather are the rest. Modeling them all in one schema means the cross-system questions — pool coverage vs evaporation vs pump scheduling, tree shade vs HVAC load, chicken manure vs compost vs garden, septic load vs water use — become answerable.
+The house is one subsystem. The pool, land, chickens, water cycle, and weather are the rest. Modeling them all in one schema means the cross-system questions — pool pump scheduling vs water use, chicken manure vs compost vs garden, septic load vs water flow, HVAC baselines vs weather — become answerable.
 
 Built for a 1984 two-story on 0.89 acres in Guthrie, OK — but the ontology is general.
 
 ## Architecture
 
-Rust workspace with seven crates:
+Rust workspace with eight crates:
 
 | Crate | Purpose |
 |---|---|
-| `lothal-core` | Pure domain types — ontology entities (site, structures, devices, property zones, trees, water systems, pools, septic, flocks, paddocks, garden beds, compost, resource flows), strongly-typed units (kWh, therms, gallons, USD, pounds, inches, ppm), temporal helpers, CDD/HDD computation |
-| `lothal-db` | sqlx persistence layer — PostgreSQL + TimescaleDB, async CRUD, batch inserts, daily weather aggregation, property operations repos |
-| `lothal-ingest` | Data pipelines — PDF bill parsers (OG&E, ONG, Guthrie water), Green Button XML, CSV import, MQTT subscriber, NWS weather API, Flume water meter, Ecobee thermostat |
-| `lothal-engine` | Analytics — weather-normalized baselines for energy and water, simulation engine (device swap, TOU shift, setpoint change, cistern, pool cover, tree removal, flock expansion), property-wide recommendation generator (13 templates), experiment evaluator |
-| `lothal-ai` | AI layer — LLM bill parsing with structured output, daily property operations briefings, MCP reasoning agent (14 tools), NILM device identification |
-| `lothal-cli` | CLI binary — interactive onboarding wizard, data management, property zones, water systems, livestock tracking, garden management, querying, simulation, experiment tracking, recommendations, reports, AI commands |
-| `lothal-web` | Web dashboard — Axum + Askama + htmx dark-theme dashboard with 8 pages (Pulse/Energy/Water/Property/Land/Lab/Bills/Chat), Chart.js visualizations, WebSocket real-time readings, LLM-powered chat |
+| `lothal-core` | Pure domain types — ontology entities (site, structures, devices, property zones, water systems, pools, septic, flocks, garden beds, resource flows), strongly-typed units (kWh, therms, gallons, USD), temporal helpers, CDD/HDD computation |
+| `lothal-ontology` | Ontology layer — Object/Link/Event/Action primitives, `Describe` trait, transactional indexer, query composition (`get_object_view`, `neighbors`, `events_for`, `search`), `ActionRegistry` with six built-in actions, smoke tests |
+| `lothal-db` | sqlx persistence layer — PostgreSQL + TimescaleDB, async CRUD, batch inserts, daily aggregation; every write-path repo emits ontology rows in the same transaction |
+| `lothal-ingest` | Data pipelines — PDF bill parsers (OG&E, ONG, Guthrie water), Green Button XML, MQTT subscriber (Emporia Vue / Home Assistant), NWS weather API, Flume water meter, Ecobee thermostat |
+| `lothal-engine` | Analytics — weather-normalized baselines, experiment evaluator, property-wide recommendation generator |
+| `lothal-ai` | AI layer — LLM bill extraction, daily briefings (via ontology context), MCP server (six generic ontology tools + per-action tools from registry), NILM device identification |
+| `lothal-cli` | CLI binary — onboarding, data management, querying, experiment tracking, recommendations, geometry import, ontology backfill |
+| `lothal-web` | Web dashboard — Axum + Askama + htmx, dark theme; universal entity page (`/e/{kind}/{id}`), property map (`/map`), Pulse dashboard, bills view; entity-scoped tool-enabled chat; WebSocket live readings |
 
 ## Quick Start
 
@@ -30,8 +31,8 @@ docker compose up -d
 # 2. Build
 cargo build
 
-# 3. Initialize your home
-cargo run -- init
+# 3. Seed schema (site + utility accounts + circuits shell)
+cargo run -- demo-seed
 
 # 4. Add your first bill
 cargo run -- bill add
@@ -43,6 +44,7 @@ cargo run -- site show
 ## Commands
 
 ```
+lothal demo-seed                         Seed site schema (no fake data)
 lothal init                              Interactive onboarding wizard
 lothal site show                         Display ontology tree
 lothal site edit                         Edit site properties
@@ -63,10 +65,6 @@ lothal query bills <account> [year]      Query bill history
 
 lothal baseline compute <account>        Compute weather-normalized baseline
 
-lothal simulate swap-pump <hp>           Pool pump upgrade simulation
-lothal simulate rate-change <plan>       Rate schedule comparison
-lothal simulate setpoint <delta> <season> Thermostat adjustment model
-
 lothal experiment create                 Create hypothesis + intervention
 lothal experiment list                   List experiments
 lothal experiment show <id>              Experiment details
@@ -74,22 +72,26 @@ lothal experiment evaluate <id>          Evaluate with weather normalization
 
 lothal recommend                         Generate ranked recommendations
 
-lothal property list                     List property zones, trees, constraints
+lothal property list                     List property zones
 lothal property add-zone                 Add a property zone
-lothal property add-tree                 Add a tree
-lothal property add-constraint           Add a constraint (leach field, easement, etc.)
+
+lothal geometry import --site <id> --file <geojson>
+                                         Import GeoJSON property boundaries
+
+lothal ontology backfill [--dry-run]     Backfill objects/links/events from
+                                         pre-existing domain rows
 
 lothal water list                        List water sources, pools, septic
-lothal water add-source                  Add a water source (municipal, well, cistern)
+lothal water add-source                  Add a water source
 lothal water add-pool                    Add a swimming pool
 lothal water add-septic                  Add septic system
 
 lothal livestock add-flock               Register a flock
-lothal livestock show                    Show flock details and paddocks
+lothal livestock show                    Show flock details
 lothal livestock log                     Log daily event (eggs, feed, etc.)
 lothal livestock list-logs [period]      List recent livestock logs
 
-lothal garden list                       List garden beds and compost piles
+lothal garden list                       List garden beds and compost
 lothal garden add-bed                    Add a garden bed
 lothal garden add-planting               Record a planting
 lothal garden add-compost                Add a compost pile
@@ -111,18 +113,18 @@ cargo run -p lothal-web
 # Open http://localhost:3000
 ```
 
-Eight pages accessible via sidebar navigation:
+Three primary pages plus a universal entity drill-down:
 
-- **Pulse** — AI briefing, stat cards, alerts, experiments, top recommendation
-- **Energy** — usage chart (24h/7d/30d/1y), circuit breakdown, baseline model, live power
-- **Water** — pool status, septic pump-out countdown
-- **Property** — interactive SVG zone map
-- **Land** — livestock (egg/feed tracking), garden beds
-- **Lab** — recommendations ranked by ROI, experiment kanban, simulations
-- **Bills** — monthly stacked bar chart, bill table
-- **Chat** — natural language queries via LLM
+- **Pulse** (`/`) — daily AI briefing, recent events stream, quick-action forms, stat cards (energy, cost, weather, eggs)
+- **Map** (`/map`) — SVG property map from GeoJSON boundaries; click any feature to open the entity drawer
+- **Bills** (`/bills`) — monthly stacked cost chart, bill table
+- **Entity** (`/e/{kind}/{id}`) — Properties / Timeline / Graph (d3-force neighbors) / Actions / Chat panels for any ontology object
+
+The entity Chat panel is scoped to the object and uses tool-enabled LLM with the full ontology tool catalog (`get_object`, `neighbors`, `events`, `timeline`, `search`, `run_action`).
 
 ## Ontology
+
+### Domain graph
 
 ```
 Site
@@ -130,31 +132,48 @@ Site
  │    ├── Zone (1:N) ── Device (N:M)
  │    └── Panel (1:N) ── Circuit (1:N) ── Device (N:1)
  ├── PropertyZone (1:N) ── outdoor lot areas (lawn, garden, coop, leach field, etc.)
- │    ├── Tree (0:N) ── species, canopy, shade analysis, cooling value
  │    ├── Paddock (0:N) ── rotational grazing linked to Flock
  │    └── Constraint (M:N) ── restrictions (leach field, easement, setback)
  ├── UtilityAccount (1:N)
  │    ├── RateSchedule (1:N, temporal)
  │    └── Bill (1:N) ── BillLineItem (1:N)
  ├── WaterSource (1:N) ── municipal, well, cistern, rainwater
- ├── Pool (0:N) ── volume, surface area, pump/heater/cover
- ├── SepticSystem (0:1) ── tank, leach field zone, pump schedule
- ├── Flock (0:N) ── breed, bird count, coop zone
- │    ├── Paddock (1:N) ── rotation order, rest schedule
- │    └── LivestockLog (time-series) ── eggs, feed, water, manure, events
- ├── GardenBed (0:N) ── type, area, irrigation source
- │    └── Planting (0:N) ── crop, dates, yield
- ├── CompostPile (0:N) ── capacity, volume, fill tracking
- ├── WaterFlow (0:N) ── directed water connections between entities
- ├── ResourceFlow (time-series) ── cross-system flows (water, energy, biomass, nutrients)
- ├── WeatherObservation (time-series, NWS or on-property)
+ ├── Pool (0:N)
+ ├── SepticSystem (0:1)
+ ├── Flock (0:N)
+ │    └── LivestockLog (time-series)
+ ├── GardenBed (0:N)
+ │    └── Planting (0:N)
+ ├── CompostPile (0:N)
+ ├── ResourceFlow (time-series)
+ ├── WeatherObservation (time-series)
  └── OccupancyEvent (time-series)
 
 Reading ── source: Device | Circuit | Zone | Meter | PropertyZone | Pool | WeatherStation
-MaintenanceEvent ── target: Device | Structure | PropertyZone | Pool | Tree | SepticSystem
+MaintenanceEvent ── target: Device | Structure | PropertyZone | Pool | SepticSystem
 Experiment ── Hypothesis + Intervention + DateRanges
 Recommendation ── Site, optionally Device
 ```
+
+### Ontology layer (lothal-ontology)
+
+Every domain entity implements `Describe` (kind, id, display_name, properties). Repos write domain rows and ontology index rows in the same transaction. Four tables:
+
+- **objects** — one row per entity, JSONB properties, full-text search vector
+- **links** — typed, time-valid directed edges (`contained_in`, `issued_by`, `targets`, `powers`, …)
+- **events** — TimescaleDB hypertable; one row per happening (`anomaly`, `observation`, `maintenance_scheduled`, `diagnosis`, `briefing_generated`, …)
+- **action_runs** — audit log for every invoked action
+
+### Built-in actions
+
+| Action | Subjects | Description |
+|---|---|---|
+| `record_observation` | any | Log free-text human observation as an event |
+| `schedule_maintenance` | device / structure / pool / zone | Insert maintenance event + emit event |
+| `run_diagnostic` | circuit / device | Pull recent readings + anomalies → LLM root-cause hypothesis |
+| `scoped_briefing` | any | LLM briefing filtered to entity's graph neighborhood |
+| `apply_recommendation` | site / device | Create Experiment + Intervention from a recommendation |
+| `ingest_bill_pdf` | utility_account | PDF → pdftotext → LLM extraction → bill rows |
 
 ## Data Sources
 
@@ -169,18 +188,24 @@ Recommendation ── Site, optionally Device
 
 ## Database
 
-PostgreSQL 17 + TimescaleDB. Ten migrations:
+PostgreSQL 17 + TimescaleDB. Sixteen migrations:
 
-1. **Core ontology** — 14 relational tables with UUID PKs
-2. **Time-series** — hypertables for readings and weather, continuous aggregates (hourly/daily rollups)
+1. **Core ontology** — relational tables with UUID PKs
+2. **Time-series** — hypertables for readings and weather, continuous aggregates (hourly/daily)
 3. **Experiments** — hypotheses, interventions, experiments, recommendations
-4. **AI layer** — bill parse provenance, daily briefings, NILM device labels, email ingest log
-5. **Property zones** — property zones, constraints, constraint-zone junction, trees
-6. **Water systems** — water sources, pools, septic systems, water flows
-7. **Livestock** — flocks, paddocks, livestock logs
-8. **Garden** — garden beds, plantings, compost piles
+4. **AI layer** — bill parse provenance, daily briefings, NILM labels, email ingest log
+5. **Property zones** — zones, constraints
+6. **Water systems** — sources, pools, septic, water flows
+7. **Livestock** — flocks, paddocks, logs
+8. **Garden** — beds, plantings, compost
 9. **Resource flows** — cross-system resource flow hypertable
-10. **Microclimate** — weather observation source tracking and rainfall
+10. **Microclimate** — weather source tracking
+11. **Scheduler runs** — daemon task execution log
+12. **Anomaly alerts** — detected deviations from baseline
+13. **Drop trees** — removes the deprecated trees table
+14. **Geometry** — GeoJSON boundary/footprint/shape columns on sites, structures, zones
+15. **Ontology layer** — objects, links, events (hypertable), action_runs
+16. **Experiment baseline** — JSONB baseline snapshot on experiments
 
 Default port is 5433 (avoids conflict with other local Postgres instances).
 
@@ -189,6 +214,7 @@ Default port is 5433 (avoids conflict with other local Postgres instances).
 - Rust 1.85+
 - Docker (for TimescaleDB)
 - `poppler` (`pdftotext` binary) for PDF bill parsing
+- `ANTHROPIC_API_KEY` for AI features (briefings, diagnostics, bill extraction)
 
 ## License
 
