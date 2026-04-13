@@ -4,12 +4,32 @@ use serde_json::{json, Value};
 use sqlx::PgPool;
 use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
 
+use lothal_ontology::ActionRegistry;
+
 use crate::AiError;
+
+/// Build the action registry this server exposes. Once `with_defaults` lands
+/// in `lothal-ontology`, swap this to `ActionRegistry::with_defaults(pool)`;
+/// for now the registry starts empty and actions surface as per-action tools
+/// as soon as callers register them.
+fn build_action_registry(_pool: &PgPool) -> ActionRegistry {
+    ActionRegistry::new()
+}
 
 /// Run the MCP server, reading JSON-RPC requests from stdin and writing
 /// responses to stdout. This implements the Model Context Protocol for use
 /// with Claude Desktop and similar MCP hosts.
 pub async fn run_server(pool: PgPool) -> Result<(), AiError> {
+    let registry = build_action_registry(&pool);
+    run_server_with_registry(pool, registry).await
+}
+
+/// Variant of `run_server` that accepts a pre-built `ActionRegistry`. Tests
+/// and embedders can pre-populate the registry with custom actions.
+pub async fn run_server_with_registry(
+    pool: PgPool,
+    registry: ActionRegistry,
+) -> Result<(), AiError> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     let reader = BufReader::new(stdin);
@@ -32,14 +52,14 @@ pub async fn run_server(pool: PgPool) -> Result<(), AiError> {
             }
         };
 
-        let response = handle_request(&request, &pool).await;
+        let response = handle_request(&request, &pool, &registry).await;
         write_response(&mut stdout, &response).await?;
     }
 
     Ok(())
 }
 
-async fn handle_request(request: &Value, pool: &PgPool) -> Value {
+async fn handle_request(request: &Value, pool: &PgPool, registry: &ActionRegistry) -> Value {
     let id = request.get("id").cloned().unwrap_or(Value::Null);
     let method = request["method"].as_str().unwrap_or("");
 
@@ -63,13 +83,15 @@ async fn handle_request(request: &Value, pool: &PgPool) -> Value {
             Value::Null
         }
 
-        "tools/list" => json_rpc_result(id, json!({ "tools": tools::tool_definitions() })),
+        "tools/list" => {
+            json_rpc_result(id, json!({ "tools": tools::tool_definitions(registry) }))
+        }
 
         "tools/call" => {
             let tool_name = request["params"]["name"].as_str().unwrap_or("");
             let arguments = request["params"]["arguments"].clone();
 
-            match tools::call_tool(tool_name, arguments, pool).await {
+            match tools::call_tool(tool_name, arguments, pool, registry).await {
                 Ok(result) => json_rpc_result(
                     id,
                     json!({
