@@ -5,14 +5,16 @@
 //! regardless of whether the object is a `site`, `device`, `flock`, or a
 //! thing invented next week.
 
-use axum::extract::{Path, State};
+use axum::extract::{Form, Path, State};
 use axum::http::{header, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde_json::Value;
+use serde::Deserialize;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
+use lothal_ai::mcp::tools;
 use lothal_ontology::query::{self, ViewOptions};
 use lothal_ontology::{ObjectRef, ObjectUri};
 
@@ -26,6 +28,7 @@ pub fn router() -> Router<AppState> {
         .route("/e/{kind}/{id}/timeline", get(timeline_partial))
         .route("/e/{kind}/{id}/graph", get(graph_partial))
         .route("/e/{kind}/{id}/actions/{name}", post(run_action))
+        .route("/e/{kind}/{id}/chat", post(chat_send))
 }
 
 // ---------------------------------------------------------------------------
@@ -303,4 +306,230 @@ async fn first_site_address(pool: &sqlx::PgPool) -> Option<String> {
         .ok()
         .and_then(|v| v.into_iter().next())
         .map(|s| s.address)
+}
+
+// ---------------------------------------------------------------------------
+// Chat (entity-scoped, tool-enabled)
+// ---------------------------------------------------------------------------
+
+/// Maximum number of Claude tool-use rounds before giving up and returning
+/// whatever assistant text was last produced.
+const CHAT_MAX_TOOL_ROUNDS: usize = 5;
+const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_VERSION: &str = "2023-06-01";
+
+#[derive(Debug, Deserialize)]
+pub struct ChatForm {
+    pub message: String,
+}
+
+async fn chat_send(
+    State(state): State<AppState>,
+    Path((kind, id_str)): Path<(String, String)>,
+    Form(form): Form<ChatForm>,
+) -> Result<Html<String>, WebError> {
+    let id = Uuid::parse_str(&id_str)
+        .map_err(|e| WebError::BadRequest(format!("invalid uuid: {e}")))?;
+    let uri = ObjectUri::new(kind.clone(), id);
+
+    // Fetch a lightweight view to get display_name for the system prompt
+    // and the user preamble. Failures bubble up as 404/500.
+    let view = query::get_object_view(
+        &state.pool,
+        &uri,
+        ViewOptions {
+            event_limit: 0,
+            neighbor_depth: 0,
+        },
+    )
+    .await
+    .map_err(|e| match e {
+        sqlx::Error::RowNotFound => WebError::NotFound,
+        other => WebError::Database(other),
+    })?;
+    let display_name = view.object.display_name.clone();
+
+    // Always render the user's message as a right-aligned bubble first.
+    let user_bubble = render_user_bubble(&form.message);
+
+    // Only Anthropic is supported for tool-use right now; other providers
+    // would require a different loop shape. If the key is missing, render
+    // the canonical error bubble and return early.
+    let api_key = match std::env::var("ANTHROPIC_API_KEY") {
+        Ok(k) if !k.is_empty() => k,
+        _ => {
+            return Ok(Html(format!(
+                "{user_bubble}{bubble}",
+                bubble = render_error_bubble(
+                    "LLM not configured. Set ANTHROPIC_API_KEY or LOTHAL_LLM_PROVIDER.",
+                ),
+            )));
+        }
+    };
+    let model = std::env::var("ANTHROPIC_MODEL").unwrap_or_else(|_| "claude-opus-4-6".into());
+
+    let system = format!(
+        "You are Lothal, a homestead operations agent. The current conversation is scoped to \
+         entity lothal://{kind}/{id} — a {display_or_kind}. You have tools to read the ontology \
+         (get_object, neighbors, events, timeline, search) and to invoke actions (run_action). \
+         Use them when a question requires data beyond your context. Be concise and actionable.",
+        display_or_kind = if display_name.is_empty() { kind.as_str() } else { display_name.as_str() },
+    );
+    let preamble = format!(
+        "User is viewing: {name} ({kind}).\n\n{msg}",
+        name = if display_name.is_empty() { kind.as_str() } else { display_name.as_str() },
+        msg = form.message,
+    );
+
+    let tool_catalog = build_tool_catalog(&state.registry);
+    let mut messages: Vec<Value> = vec![json!({
+        "role": "user",
+        "content": [{ "type": "text", "text": preamble }],
+    })];
+
+    let http = reqwest::Client::new();
+    let mut last_text = String::new();
+
+    // Tool-use loop: call Claude, dispatch any tool_use blocks, feed
+    // tool_result blocks back, repeat. Capped at CHAT_MAX_TOOL_ROUNDS.
+    for _ in 0..CHAT_MAX_TOOL_ROUNDS {
+        let body = json!({
+            "model": model,
+            "max_tokens": 2048,
+            "system": system,
+            "tools": tool_catalog,
+            "messages": messages,
+        });
+
+        let resp = match http
+            .post(ANTHROPIC_API_URL)
+            .header("x-api-key", &api_key)
+            .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                return Ok(Html(format!(
+                    "{user_bubble}{bubble}",
+                    bubble = render_error_bubble(&format!("LLM request failed: {e}")),
+                )));
+            }
+        };
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Ok(Html(format!(
+                "{user_bubble}{bubble}",
+                bubble = render_error_bubble(&format!("Anthropic {status}: {text}")),
+            )));
+        }
+        let data: Value = match resp.json().await {
+            Ok(v) => v,
+            Err(e) => {
+                return Ok(Html(format!(
+                    "{user_bubble}{bubble}",
+                    bubble = render_error_bubble(&format!("Invalid Anthropic response: {e}")),
+                )));
+            }
+        };
+
+        // Accumulate any text blocks so we can display the final assistant
+        // message even if we also executed tools this round.
+        let content = data["content"].as_array().cloned().unwrap_or_default();
+        let round_text = content
+            .iter()
+            .filter(|b| b["type"] == "text")
+            .filter_map(|b| b["text"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !round_text.is_empty() {
+            last_text = round_text;
+        }
+
+        // Collect tool_use blocks; if none, we're done.
+        let tool_uses: Vec<&Value> =
+            content.iter().filter(|b| b["type"] == "tool_use").collect();
+        if tool_uses.is_empty() {
+            break;
+        }
+
+        // Echo the assistant turn verbatim so tool_use_ids line up.
+        messages.push(json!({
+            "role": "assistant",
+            "content": content,
+        }));
+
+        // Dispatch each tool call and append a single user turn whose
+        // content is the list of tool_result blocks (echoing tool_use_id).
+        let mut tool_results: Vec<Value> = Vec::with_capacity(tool_uses.len());
+        for block in tool_uses {
+            let tool_use_id = block["id"].as_str().unwrap_or("").to_string();
+            let tool_name = block["name"].as_str().unwrap_or("");
+            let args = block["input"].clone();
+            let (text, is_error) =
+                match tools::call_tool(tool_name, args, &state.pool, &state.registry).await {
+                    Ok(v) => (
+                        serde_json::to_string(&v).unwrap_or_else(|_| "{}".into()),
+                        false,
+                    ),
+                    Err(e) => (format!("Error: {e}"), true),
+                };
+            tool_results.push(json!({
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "content": text,
+                "is_error": is_error,
+            }));
+        }
+        messages.push(json!({ "role": "user", "content": tool_results }));
+    }
+
+    let assistant_bubble = if last_text.is_empty() {
+        render_error_bubble(
+            "No response from the assistant (tool-use limit reached without final text).",
+        )
+    } else {
+        render_assistant_bubble(&last_text)
+    };
+    Ok(Html(format!("{user_bubble}{assistant_bubble}")))
+}
+
+/// Translate MCP tool definitions (camelCase `inputSchema`) into Anthropic's
+/// Messages-API shape (`input_schema`).
+fn build_tool_catalog(registry: &lothal_ontology::ActionRegistry) -> Vec<Value> {
+    tools::tool_definitions(registry)
+        .into_iter()
+        .map(|mut t| {
+            if let Some(obj) = t.as_object_mut() {
+                if let Some(schema) = obj.remove("inputSchema") {
+                    obj.insert("input_schema".into(), schema);
+                }
+            }
+            t
+        })
+        .collect()
+}
+
+fn render_user_bubble(message: &str) -> String {
+    format!(
+        r#"<div class="flex justify-end"><div class="max-w-[85%] bg-[#4f9cf7] text-white rounded-2xl rounded-br-sm px-4 py-2 text-sm whitespace-pre-wrap break-words">{text}</div></div>"#,
+        text = html_escape(message),
+    )
+}
+
+fn render_assistant_bubble(message: &str) -> String {
+    format!(
+        r#"<div class="flex justify-start"><div class="max-w-[85%] bg-[#232736] text-[#e8eaed] border border-[#2e3346] rounded-2xl rounded-bl-sm px-4 py-2 text-sm whitespace-pre-wrap break-words">{text}</div></div>"#,
+        text = html_escape(message),
+    )
+}
+
+fn render_error_bubble(message: &str) -> String {
+    format!(
+        r#"<div class="flex justify-start"><div class="max-w-[85%] bg-[#2a1d22] text-[#f76c6c] border border-[#f76c6c]/40 rounded-2xl rounded-bl-sm px-4 py-2 text-sm whitespace-pre-wrap break-words">{text}</div></div>"#,
+        text = html_escape(message),
+    )
 }
