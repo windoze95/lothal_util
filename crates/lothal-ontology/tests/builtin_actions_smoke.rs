@@ -16,8 +16,8 @@ use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use lothal_ontology::action::ActionRegistry;
 use lothal_ontology::ObjectRef;
+use lothal_ontology::action::ActionRegistry;
 
 fn test_database_url() -> Option<String> {
     env::var("TEST_DATABASE_URL")
@@ -121,7 +121,9 @@ async fn record_observation_persists_event_and_audit_row() {
              AND subjects @> $1
              AND properties->>'text' = 'smoke test'"#,
     )
-    .bind(sqlx::types::Json(json!([{ "kind": "property_zone", "id": zone }])))
+    .bind(sqlx::types::Json(
+        json!([{ "kind": "property_zone", "id": zone }]),
+    ))
     .fetch_one(&pool)
     .await
     .expect("count observation events");
@@ -181,7 +183,9 @@ async fn schedule_maintenance_persists_event_and_row() {
            WHERE kind = 'maintenance_scheduled'
              AND subjects @> $1"#,
     )
-    .bind(sqlx::types::Json(json!([{ "kind": "property_zone", "id": zone }])))
+    .bind(sqlx::types::Json(
+        json!([{ "kind": "property_zone", "id": zone }]),
+    ))
     .fetch_one(&pool)
     .await
     .expect("count scheduled events");
@@ -189,6 +193,125 @@ async fn schedule_maintenance_persists_event_and_row() {
 
     // Audit row output carries the maintenance_event_ids list with one id.
     let out = run.output.as_ref().unwrap().0.clone();
-    let ids = out.get("maintenance_event_ids").and_then(|v| v.as_array()).expect("ids array");
+    let ids = out
+        .get("maintenance_event_ids")
+        .and_then(|v| v.as_array())
+        .expect("ids array");
     assert_eq!(ids.len(), 1, "one id returned");
+}
+
+/// Seed a `recommendations` row for `site_id`. Returns the new recommendation id.
+async fn seed_recommendation(pool: &PgPool, site_id: Uuid) -> Uuid {
+    let rec_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO recommendations
+               (id, site_id, device_id, title, description, category,
+                estimated_annual_savings, estimated_capex, payback_years,
+                confidence, priority_score, data_requirements, created_at)
+           VALUES ($1, $2, NULL, 'Swap pool pump for variable-speed',
+                   'Replace single-speed pool pump with VS pump.',
+                   'Device Swap', 420.0, 900.0, 2.14, 0.8, 196.0, NULL, now())"#,
+    )
+    .bind(rec_id)
+    .bind(site_id)
+    .execute(pool)
+    .await
+    .expect("seed recommendation");
+    rec_id
+}
+
+#[tokio::test]
+#[ignore = "requires a live TimescaleDB — run via `cargo test -- --ignored`"]
+async fn apply_recommendation_creates_experiment_intervention_and_events() {
+    let Some(pool) = bootstrap_pool().await else {
+        return;
+    };
+    let (site_id, _zone_id) = seed_site_and_zone(&pool).await;
+    let rec_id = seed_recommendation(&pool, site_id).await;
+
+    let registry = ActionRegistry::with_defaults(pool.clone());
+    let run = registry
+        .invoke(
+            "apply_recommendation",
+            "test:user",
+            pool.clone(),
+            vec![ObjectRef::new("site", site_id)],
+            json!({ "recommendation_id": rec_id.to_string() }),
+        )
+        .await
+        .expect("invoke apply_recommendation");
+
+    assert_eq!(run.status, "succeeded");
+    let out = run.output.as_ref().expect("output").0.clone();
+    let experiment_id = out
+        .get("experiment_id")
+        .and_then(|v| v.as_str())
+        .and_then(|s| Uuid::parse_str(s).ok())
+        .expect("experiment_id present");
+    let intervention_id = out
+        .get("intervention_id")
+        .and_then(|v| v.as_str())
+        .and_then(|s| Uuid::parse_str(s).ok())
+        .expect("intervention_id present");
+
+    // Experiment row wired to hypothesis + intervention for this site.
+    let (exp_count,): (i64,) = sqlx::query_as(
+        r#"SELECT count(*) FROM experiments
+           WHERE id = $1 AND site_id = $2 AND intervention_id = $3
+             AND status = 'active'"#,
+    )
+    .bind(experiment_id)
+    .bind(site_id)
+    .bind(intervention_id)
+    .fetch_one(&pool)
+    .await
+    .expect("count experiments");
+    assert_eq!(exp_count, 1, "experiment row exists for site");
+
+    // Intervention row with the expected shape.
+    let (iv_count,): (i64,) = sqlx::query_as(
+        r#"SELECT count(*) FROM interventions
+           WHERE id = $1 AND site_id = $2 AND reversible = true
+             AND description LIKE 'Applied from recommendation%'"#,
+    )
+    .bind(intervention_id)
+    .bind(site_id)
+    .fetch_one(&pool)
+    .await
+    .expect("count interventions");
+    assert_eq!(iv_count, 1, "intervention row exists");
+
+    // `experiment_started` event with the experiment as a subject.
+    let (started_count,): (i64,) = sqlx::query_as(
+        r#"SELECT count(*) FROM events
+           WHERE kind = 'experiment_started'
+             AND subjects @> $1"#,
+    )
+    .bind(sqlx::types::Json(
+        json!([{ "kind": "experiment", "id": experiment_id }]),
+    ))
+    .fetch_one(&pool)
+    .await
+    .expect("count started events");
+    assert_eq!(started_count, 1, "experiment_started event emitted");
+
+    // `recommendation_applied` event links the recommendation + experiment.
+    let (applied_count,): (i64,) = sqlx::query_as(
+        r#"SELECT count(*) FROM events
+           WHERE kind = 'recommendation_applied'
+             AND subjects @> $1"#,
+    )
+    .bind(sqlx::types::Json(
+        json!([{ "kind": "recommendation", "id": rec_id }]),
+    ))
+    .fetch_one(&pool)
+    .await
+    .expect("count applied events");
+    assert_eq!(applied_count, 1, "recommendation_applied event emitted");
+
+    // Site has no readings in this test, so baseline snapshot is null.
+    let baseline = out
+        .get("baseline_snapshot_id")
+        .expect("baseline_snapshot_id key");
+    assert!(baseline.is_null(), "no readings → null snapshot");
 }

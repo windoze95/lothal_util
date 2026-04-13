@@ -135,11 +135,7 @@ pub async fn insert_experiment(pool: &PgPool, e: &Experiment) -> Result<(), sqlx
         ),
     )
     .await?;
-    indexer::emit_event(
-        &mut tx,
-        EventSpec::record_registered(e, "repo:experiment"),
-    )
-    .await?;
+    indexer::emit_event(&mut tx, EventSpec::record_registered(e, "repo:experiment")).await?;
 
     tx.commit().await?;
     Ok(())
@@ -273,6 +269,29 @@ pub async fn list_recommendations_by_site(
     .await?;
 
     Ok(rows.iter().map(recommendation_from_row).collect())
+}
+
+/// Fetch a single persisted recommendation by id.
+///
+/// Returns `Ok(None)` when the id does not exist. The `apply_recommendation`
+/// action depends on this lookup; the engine's `generate_recommendations` does
+/// not persist on its own, so callers must `insert_recommendation` before a
+/// recommendation can be looked up here.
+pub async fn get_recommendation(
+    pool: &PgPool,
+    id: Uuid,
+) -> Result<Option<Recommendation>, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT id, site_id, device_id, title, description, category,
+                estimated_annual_savings, estimated_capex, payback_years,
+                confidence, priority_score, data_requirements, created_at
+         FROM recommendations WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(|r| recommendation_from_row(&r)))
 }
 
 fn recommendation_from_row(row: &sqlx::postgres::PgRow) -> Recommendation {
