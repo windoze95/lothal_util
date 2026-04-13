@@ -28,11 +28,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("database connected and migrations applied");
 
     let (readings_tx, _) = tokio::sync::broadcast::channel(256);
-    // ActionRegistry starts empty; once `with_defaults(pool)` is added to
-    // `lothal-ontology`, swap this for that. The rest of the web layer
-    // already routes every action invocation through `state.registry`, so
-    // new defaults light up automatically.
-    let registry = std::sync::Arc::new(lothal_ontology::ActionRegistry::new());
+    let registry = std::sync::Arc::new(lothal_ontology::ActionRegistry::with_defaults(pool.clone()));
     let state = AppState {
         pool,
         readings_tx,

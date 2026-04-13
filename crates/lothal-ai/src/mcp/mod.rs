@@ -8,12 +8,11 @@ use lothal_ontology::ActionRegistry;
 
 use crate::AiError;
 
-/// Build the action registry this server exposes. Once `with_defaults` lands
-/// in `lothal-ontology`, swap this to `ActionRegistry::with_defaults(pool)`;
-/// for now the registry starts empty and actions surface as per-action tools
-/// as soon as callers register them.
-fn build_action_registry(_pool: &PgPool) -> ActionRegistry {
-    ActionRegistry::new()
+/// Build the action registry this server exposes — populated from
+/// `ActionRegistry::with_defaults` so registered actions surface as per-action
+/// tools in the MCP tool list automatically.
+fn build_action_registry(pool: &PgPool) -> ActionRegistry {
+    ActionRegistry::with_defaults(pool.clone())
 }
 
 /// Run the MCP server, reading JSON-RPC requests from stdin and writing
