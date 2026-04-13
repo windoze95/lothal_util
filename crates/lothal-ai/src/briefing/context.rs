@@ -1,7 +1,23 @@
-use chrono::NaiveDate;
+//! Gather the data needed to render a daily briefing.
+//!
+//! Cross-domain joins are delegated to `lothal_ontology::query`:
+//! `get_object_view` walks the site + its neighbors in one composed query,
+//! and `events_for` pulls anomaly / maintenance_scheduled events in explicit
+//! time windows.
+//!
+//! Three inputs stay outside the ontology on purpose:
+//!   * **Weather** — `weather_observations` is a TimescaleDB hypertable.
+//!   * **Readings** — `readings_daily` is a continuous aggregate; time-series
+//!     data is intentionally not indexed into `objects`.
+//!   * **Baseline** — a computed value from `lothal-engine`, not a lookup.
+
+use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use serde::Serialize;
 use sqlx::PgPool;
 use uuid::Uuid;
+
+use lothal_ontology::query::{self, ViewOptions};
+use lothal_ontology::{EventRecord, ObjectUri};
 
 use crate::AiError;
 
@@ -77,60 +93,75 @@ pub struct SepticAlert {
     pub is_overdue: bool,
 }
 
-/// Gather all context data for a daily briefing from the database.
+// ---------------------------------------------------------------------------
+// Public entry point
+// ---------------------------------------------------------------------------
+
+/// Gather all context data for a daily briefing.
+///
+/// One `get_object_view(site)` walk + two ranged `events_for` queries replace
+/// the old bespoke per-domain joins. Pools, flocks, and experiments are
+/// resolved by projecting the site's neighbor list onto typed repo lookups.
 pub async fn gather_context(
     pool: &PgPool,
     site_id: Uuid,
     date: NaiveDate,
 ) -> Result<BriefingContext, AiError> {
-    let (weather, total_kwh, circuit_anomalies, maintenance_due, active_experiments) = tokio::try_join!(
+    let site_uri = ObjectUri::new("site", site_id);
+
+    let yesterday_start = day_start_utc(date);
+    let today_end = day_end_utc(date);
+    let today_start = day_start_utc(date + chrono::Duration::days(1));
+    let today_end_plus = day_end_utc(date + chrono::Duration::days(1));
+
+    // Ontology view: site + neighbors + recent events where site is a subject.
+    let view = query::get_object_view(
+        pool,
+        &site_uri,
+        ViewOptions {
+            event_limit: 50,
+            neighbor_depth: 2,
+        },
+    )
+    .await?;
+
+    // Ontology event windows.
+    let anomaly_events =
+        query::events_for(pool, &[site_uri.clone()], yesterday_start, today_end, Some("anomaly"))
+            .await
+            .unwrap_or_default();
+    let scheduled_maintenance_events = query::events_for(
+        pool,
+        &[site_uri.clone()],
+        today_start,
+        today_end_plus,
+        Some("maintenance_scheduled"),
+    )
+    .await
+    .unwrap_or_default();
+
+    // Weather + readings + readings-derived anomalies (outside the ontology).
+    let (weather, total_kwh, circuit_anomalies) = tokio::try_join!(
         fetch_weather_summary(pool, site_id, date),
         fetch_daily_electric_usage(pool, site_id, date),
         fetch_circuit_anomalies(pool, site_id, date),
-        fetch_maintenance_due(pool, site_id, date),
-        fetch_active_experiments(pool, site_id),
     )?;
 
-    // Property operations context — fetched in parallel. Errors are logged but
-    // do not block the briefing (a missing query result and a failed query
-    // both degrade gracefully, but only one is a bug).
-    let (pool_status, livestock_summary, septic_alert) = tokio::join!(
-        fetch_pool_status(pool, site_id),
-        fetch_livestock_summary(pool, site_id, date),
-        fetch_septic_alert(pool, site_id),
-    );
-    let pool_status = match pool_status {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!("pool status query failed: {e}");
-            None
-        }
-    };
-    let livestock_summary = match livestock_summary {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!("livestock summary query failed: {e}");
-            None
-        }
-    };
-    let septic_alert = match septic_alert {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!("septic alert query failed: {e}");
-            None
-        }
-    };
+    let pool_status = first_pool_status(pool, &view).await;
+    let livestock_summary = first_livestock_summary(pool, &view, date).await;
+    let septic_alert = site_septic_alert(pool, site_id).await;
+    let active_experiments = resolve_active_experiments(pool, site_id, &view).await;
+    let maintenance_due =
+        gather_maintenance_due(pool, site_id, date, &scheduled_maintenance_events).await;
+    let circuit_anomalies = merge_circuit_anomalies(circuit_anomalies, &anomaly_events);
 
-    // Compute baseline comparison if we have weather and usage data.
     let baseline_comparison = match (&weather, total_kwh) {
-        (Some(w), Some(actual)) => compute_baseline_comparison(pool, site_id, w, actual).await.ok(),
+        (Some(w), Some(actual)) => {
+            compute_baseline_comparison(pool, site_id, w, actual).await.ok()
+        }
         _ => None,
     };
-
-    let estimated_cost = total_kwh.map(|kwh| {
-        // Default to Oklahoma average residential rate if no rate schedule found.
-        kwh * 0.11
-    });
+    let estimated_cost = total_kwh.map(|kwh| kwh * 0.11);
 
     Ok(BriefingContext {
         date,
@@ -147,6 +178,253 @@ pub async fn gather_context(
         septic_alert,
     })
 }
+
+// ---------------------------------------------------------------------------
+// Time helpers
+// ---------------------------------------------------------------------------
+
+fn day_start_utc(d: NaiveDate) -> DateTime<Utc> {
+    Utc.from_utc_datetime(&d.and_hms_opt(0, 0, 0).expect("valid midnight"))
+}
+
+fn day_end_utc(d: NaiveDate) -> DateTime<Utc> {
+    day_start_utc(d + chrono::Duration::days(1))
+}
+
+// ---------------------------------------------------------------------------
+// Neighbor projections
+// ---------------------------------------------------------------------------
+
+async fn first_pool_status(pool_conn: &PgPool, view: &query::ObjectView) -> Option<PoolDayStatus> {
+    let obj = view
+        .neighbors
+        .iter()
+        .find_map(|(_, o)| (o.kind == "pool").then_some(o))?;
+    match lothal_db::water::get_pool(pool_conn, obj.id).await {
+        Ok(Some(p)) => Some(PoolDayStatus {
+            pool_name: p.name,
+            // TODO: runtime hours when pool.pump_device_id is set.
+            pump_runtime_hours: None,
+        }),
+        Ok(None) => None,
+        Err(e) => {
+            tracing::warn!("pool repo lookup failed: {e}");
+            None
+        }
+    }
+}
+
+async fn first_livestock_summary(
+    pool_conn: &PgPool,
+    view: &query::ObjectView,
+    date: NaiveDate,
+) -> Option<LivestockDaySummary> {
+    let obj = view
+        .neighbors
+        .iter()
+        .find_map(|(_, o)| (o.kind == "flock").then_some(o))?;
+    let flock = match lothal_db::livestock::get_flock(pool_conn, obj.id).await {
+        Ok(Some(f)) => f,
+        Ok(None) => return None,
+        Err(e) => {
+            tracing::warn!("flock repo lookup failed: {e}");
+            return None;
+        }
+    };
+    match lothal_db::livestock::get_flock_daily_summary(pool_conn, flock.id, date).await {
+        Ok(s) => Some(LivestockDaySummary {
+            flock_name: flock.name,
+            eggs: s.eggs,
+            feed_lbs: s.feed_lbs,
+            mortality: s.mortality,
+        }),
+        Err(e) => {
+            tracing::warn!("flock daily summary failed: {e}");
+            None
+        }
+    }
+}
+
+async fn site_septic_alert(pool_conn: &PgPool, site_id: Uuid) -> Option<SepticAlert> {
+    // SepticSystem has no `Describe` impl today, so it isn't reachable from
+    // the site's neighbor list. Fetch directly by site_id.
+    let septic = match lothal_db::water::get_septic_system(pool_conn, site_id).await {
+        Ok(Some(s)) => s,
+        Ok(None) => return None,
+        Err(e) => {
+            tracing::warn!("septic repo lookup failed: {e}");
+            return None;
+        }
+    };
+    let days = septic.days_until_pump()?;
+    if days > 90 {
+        return None;
+    }
+    Some(SepticAlert {
+        days_until_pump: days,
+        is_overdue: days < 0,
+    })
+}
+
+async fn resolve_active_experiments(
+    pool_conn: &PgPool,
+    site_id: Uuid,
+    view: &query::ObjectView,
+) -> Vec<ActiveExperiment> {
+    let experiment_ids: Vec<Uuid> = view
+        .neighbors
+        .iter()
+        .filter_map(|(_, o)| (o.kind == "experiment").then_some(o.id))
+        .collect();
+    if experiment_ids.is_empty() {
+        return Vec::new();
+    }
+    let experiments = match lothal_db::experiment::list_experiments_by_site(pool_conn, site_id).await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("list_experiments_by_site failed: {e}");
+            return Vec::new();
+        }
+    };
+    let hypotheses = match lothal_db::experiment::list_hypotheses_by_site(pool_conn, site_id).await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("list_hypotheses_by_site failed: {e}");
+            return Vec::new();
+        }
+    };
+    let hypothesis_by_id: std::collections::HashMap<_, _> =
+        hypotheses.into_iter().map(|h| (h.id, h)).collect();
+
+    experiments
+        .into_iter()
+        .filter(|e| experiment_ids.contains(&e.id))
+        .filter(|e| {
+            matches!(
+                e.status,
+                lothal_core::ontology::experiment::ExperimentStatus::Active
+            )
+        })
+        .filter_map(|e| {
+            hypothesis_by_id
+                .get(&e.hypothesis_id)
+                .map(|h| ActiveExperiment {
+                    title: h.title.clone(),
+                })
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Maintenance & anomaly merge: ontology events + repo fallback
+// ---------------------------------------------------------------------------
+
+async fn gather_maintenance_due(
+    pool_conn: &PgPool,
+    site_id: Uuid,
+    today: NaiveDate,
+    scheduled_events: &[EventRecord],
+) -> Vec<MaintenanceDue> {
+    let within = today + chrono::Duration::days(7);
+    let mut due: Vec<MaintenanceDue> = Vec::new();
+
+    for ev in scheduled_events {
+        let due_date = ev
+            .properties
+            .0
+            .get("due_date")
+            .and_then(|v| v.as_str())
+            .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+            .unwrap_or_else(|| ev.time.date_naive());
+        if due_date < today || due_date > within {
+            continue;
+        }
+        due.push(MaintenanceDue {
+            description: ev.summary.clone(),
+            due_date,
+        });
+    }
+
+    // Fallback to the repo-owned `maintenance_events.next_due` path for
+    // events that predate the ontology `maintenance_scheduled` stream.
+    match lothal_db::maintenance::get_upcoming_maintenance(pool_conn, site_id).await {
+        Ok(rows) => {
+            for m in rows {
+                let Some(next_due) = m.next_due else { continue };
+                if next_due < today || next_due > within {
+                    continue;
+                }
+                if due
+                    .iter()
+                    .any(|d| d.due_date == next_due && d.description == m.description)
+                {
+                    continue;
+                }
+                due.push(MaintenanceDue {
+                    description: m.description,
+                    due_date: next_due,
+                });
+            }
+        }
+        Err(e) => tracing::warn!("get_upcoming_maintenance failed: {e}"),
+    }
+
+    due.sort_by_key(|d| d.due_date);
+    due
+}
+
+fn merge_circuit_anomalies(
+    mut from_readings: Vec<CircuitAnomaly>,
+    anomaly_events: &[EventRecord],
+) -> Vec<CircuitAnomaly> {
+    // Only surface circuit-shaped anomaly events — site-wide deviations live
+    // on `baseline_comparison`.
+    for ev in anomaly_events {
+        let is_circuit = ev
+            .properties
+            .0
+            .get("source_type")
+            .and_then(|v| v.as_str())
+            == Some("circuit");
+        if !is_circuit {
+            continue;
+        }
+        let label = ev
+            .properties
+            .0
+            .get("label")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&ev.summary)
+            .to_string();
+        if from_readings.iter().any(|a| a.circuit_label == label) {
+            continue;
+        }
+        let actual = ev
+            .properties
+            .0
+            .get("value")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let avg = ev
+            .properties
+            .0
+            .get("baseline_value")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        from_readings.push(CircuitAnomaly {
+            circuit_label: label,
+            actual_hours: actual,
+            avg_hours: avg,
+        });
+    }
+    from_readings
+}
+
+// ---------------------------------------------------------------------------
+// Non-ontology data paths: weather, readings, baseline
+// ---------------------------------------------------------------------------
 
 async fn fetch_weather_summary(
     pool: &PgPool,
@@ -185,7 +463,6 @@ async fn fetch_daily_electric_usage(
     site_id: Uuid,
     date: NaiveDate,
 ) -> Result<Option<f64>, sqlx::Error> {
-    // Sum kWh readings from the daily continuous aggregate for electric sources.
     let row = sqlx::query_as::<_, (Option<f64>,)>(
         r#"SELECT SUM(rd.sum_value)
            FROM readings_daily rd
@@ -209,7 +486,9 @@ async fn fetch_circuit_anomalies(
     site_id: Uuid,
     date: NaiveDate,
 ) -> Result<Vec<CircuitAnomaly>, sqlx::Error> {
-    // Find circuits where yesterday's runtime was >50% above the 14-day average.
+    // Readings-derived circuit-runtime anomalies (mirrors
+    // `lothal_ai::anomaly::detect_circuit_anomalies`). When anomaly sweep
+    // events land in the ontology, `merge_circuit_anomalies` dedupes them.
     let rows = sqlx::query_as::<_, (String, f64, f64)>(
         r#"WITH yesterday AS (
                SELECT source_id, SUM(sum_value) as total
@@ -254,77 +533,12 @@ async fn fetch_circuit_anomalies(
         .collect())
 }
 
-async fn fetch_maintenance_due(
-    pool: &PgPool,
-    site_id: Uuid,
-    date: NaiveDate,
-) -> Result<Vec<MaintenanceDue>, sqlx::Error> {
-    let within = date + chrono::Duration::days(7);
-
-    let rows = sqlx::query_as::<_, (String, NaiveDate)>(
-        r#"SELECT
-               COALESCE(d.label, s.address, me.maintenance_type::text) as description,
-               me.next_due
-           FROM maintenance_events me
-           LEFT JOIN devices d ON me.target_type = 'device' AND me.target_id = d.id
-           LEFT JOIN structures s ON me.target_type = 'structure' AND me.target_id = s.id
-           WHERE (
-               (me.target_type = 'device' AND me.target_id IN (
-                   SELECT d2.id FROM devices d2
-                   JOIN structures s2 ON d2.structure_id = s2.id
-                   WHERE s2.site_id = $1
-               ))
-               OR (me.target_type = 'structure' AND me.target_id IN (
-                   SELECT s3.id FROM structures s3 WHERE s3.site_id = $1
-               ))
-           )
-           AND me.next_due IS NOT NULL
-           AND me.next_due <= $3
-           AND me.next_due >= $2
-           ORDER BY me.next_due"#,
-    )
-    .bind(site_id)
-    .bind(date)
-    .bind(within)
-    .fetch_all(pool)
-    .await?;
-
-    Ok(rows
-        .into_iter()
-        .map(|(desc, due)| MaintenanceDue {
-            description: desc,
-            due_date: due,
-        })
-        .collect())
-}
-
-async fn fetch_active_experiments(
-    pool: &PgPool,
-    site_id: Uuid,
-) -> Result<Vec<ActiveExperiment>, sqlx::Error> {
-    let rows = sqlx::query_as::<_, (String,)>(
-        r#"SELECT h.title
-           FROM experiments e
-           JOIN hypotheses h ON e.hypothesis_id = h.id
-           WHERE h.site_id = $1 AND e.status = 'active'"#,
-    )
-    .bind(site_id)
-    .fetch_all(pool)
-    .await?;
-
-    Ok(rows
-        .into_iter()
-        .map(|(title,)| ActiveExperiment { title })
-        .collect())
-}
-
 async fn compute_baseline_comparison(
     pool: &PgPool,
     site_id: Uuid,
     weather: &WeatherSummary,
     actual_kwh: f64,
 ) -> Result<BaselineComparison, AiError> {
-    // Fetch the most recent bills to compute a baseline.
     let accounts = lothal_db::bill::list_utility_accounts_by_site(pool, site_id).await?;
 
     let electric_account = accounts
@@ -332,14 +546,12 @@ async fn compute_baseline_comparison(
         .find(|a| a.utility_type.to_string().to_lowercase() == "electric")
         .ok_or_else(|| AiError::Validation("No electric account found".into()))?;
 
-    let bills =
-        lothal_db::bill::list_bills_by_account(pool, electric_account.id).await?;
+    let bills = lothal_db::bill::list_bills_by_account(pool, electric_account.id).await?;
 
     if bills.len() < 3 {
         return Err(AiError::Validation("Not enough bills for baseline".into()));
     }
 
-    // Build daily data points from bills + weather for baseline computation.
     let weather_days = lothal_db::weather::get_daily_weather_summaries(
         pool,
         site_id,
@@ -375,7 +587,6 @@ async fn compute_baseline_comparison(
         return Err(AiError::Validation("Insufficient data for baseline".into()));
     }
 
-    // Use cooling or heating baseline depending on today's weather.
     let mode = if weather.cooling_degree_days > weather.heating_degree_days {
         lothal_engine::baseline::BaselineMode::Cooling
     } else {
@@ -402,69 +613,4 @@ async fn compute_baseline_comparison(
         actual_kwh,
         deviation_pct,
     })
-}
-
-// ---------------------------------------------------------------------------
-// Property operations context fetchers
-// ---------------------------------------------------------------------------
-
-async fn fetch_pool_status(
-    pool: &PgPool,
-    site_id: Uuid,
-) -> Result<Option<PoolDayStatus>, sqlx::Error> {
-    let pools = lothal_db::water::list_pools_by_site(pool, site_id).await?;
-    let first = match pools.into_iter().next() {
-        Some(p) => p,
-        None => return Ok(None),
-    };
-
-    Ok(Some(PoolDayStatus {
-        pool_name: first.name,
-        pump_runtime_hours: None, // TODO: query from readings when pump_device_id is set
-    }))
-}
-
-async fn fetch_livestock_summary(
-    pool: &PgPool,
-    site_id: Uuid,
-    date: NaiveDate,
-) -> Result<Option<LivestockDaySummary>, sqlx::Error> {
-    let flocks = lothal_db::livestock::list_flocks_by_site(pool, site_id).await?;
-    let flock = match flocks.into_iter().next() {
-        Some(f) => f,
-        None => return Ok(None),
-    };
-
-    let summary = lothal_db::livestock::get_flock_daily_summary(pool, flock.id, date).await?;
-    Ok(Some(LivestockDaySummary {
-        flock_name: flock.name,
-        eggs: summary.eggs,
-        feed_lbs: summary.feed_lbs,
-        mortality: summary.mortality,
-    }))
-}
-
-async fn fetch_septic_alert(
-    pool: &PgPool,
-    site_id: Uuid,
-) -> Result<Option<SepticAlert>, sqlx::Error> {
-    let septic = match lothal_db::water::get_septic_system(pool, site_id).await? {
-        Some(s) => s,
-        None => return Ok(None),
-    };
-
-    let days = match septic.days_until_pump() {
-        Some(d) => d,
-        None => return Ok(None),
-    };
-
-    // Only alert if within 90 days or overdue
-    if days > 90 {
-        return Ok(None);
-    }
-
-    Ok(Some(SepticAlert {
-        days_until_pump: days,
-        is_overdue: days < 0,
-    }))
 }
