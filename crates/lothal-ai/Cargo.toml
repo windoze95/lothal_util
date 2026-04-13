@@ -10,6 +10,7 @@ authors.workspace = true
 lothal-core = { workspace = true }
 lothal-db = { workspace = true }
 lothal-engine = { workspace = true }
+lothal-ontology = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
