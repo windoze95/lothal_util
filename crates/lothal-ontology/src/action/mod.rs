@@ -104,9 +104,8 @@ impl ActionRegistry {
     /// Construct a registry seeded with the default built-in actions.
     ///
     /// Registers: `record_observation`, `schedule_maintenance`,
-    /// `run_diagnostic`, `scoped_briefing`. The stub actions
-    /// `apply_recommendation` and `ingest_bill_pdf` are intentionally
-    /// left out until they gain real bodies.
+    /// `run_diagnostic`, `scoped_briefing`, `apply_recommendation`,
+    /// `ingest_bill_pdf`.
     ///
     /// The `pool` is only used by the action bodies via `ActionCtx`; the
     /// parameter is accepted here to keep the constructor signature stable
@@ -117,6 +116,8 @@ impl ActionRegistry {
         reg.register(Arc::new(builtin::schedule_maintenance::ScheduleMaintenance));
         reg.register(Arc::new(builtin::run_diagnostic::RunDiagnostic));
         reg.register(Arc::new(builtin::scoped_briefing::ScopedBriefing));
+        reg.register(Arc::new(builtin::apply_recommendation::ApplyRecommendation));
+        reg.register(Arc::new(builtin::ingest_bill_pdf::IngestBillPdf));
         reg
     }
 

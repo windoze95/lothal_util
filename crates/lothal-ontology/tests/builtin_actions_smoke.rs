@@ -140,6 +140,62 @@ async fn record_observation_persists_event_and_audit_row() {
 
 #[tokio::test]
 #[ignore = "requires a live TimescaleDB — run via `cargo test -- --ignored`"]
+async fn ingest_bill_pdf_is_registered_and_rejects_garbage() {
+    // We don't exercise the full LLM+pdftotext pipeline here (both require
+    // external processes / API keys). Instead we verify:
+    //   (a) the action is present in `with_defaults`,
+    //   (b) it complains about bad input before reaching those externals.
+    // An optional richer fixture test would require embedding a real PDF and
+    // mocking `LlmCompleter`, which we skip until a fixture is checked in.
+    let Some(pool) = bootstrap_pool().await else {
+        return;
+    };
+    let (site_id, _zone) = seed_site_and_zone(&pool).await;
+
+    // Seed a utility_account so the subject resolves.
+    let account_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO utility_accounts (id, site_id, provider_name, utility_type,
+                                         account_number, meter_id, is_active,
+                                         created_at, updated_at)
+           VALUES ($1, $2, 'OG&E', 'electric', NULL, NULL, true, now(), now())"#,
+    )
+    .bind(account_id)
+    .bind(site_id)
+    .execute(&pool)
+    .await
+    .expect("seed utility_account");
+
+    let registry = ActionRegistry::with_defaults(pool.clone());
+    assert!(
+        registry.get("ingest_bill_pdf").is_some(),
+        "ingest_bill_pdf must be in with_defaults"
+    );
+    assert!(
+        registry.get("apply_recommendation").is_some(),
+        "apply_recommendation must be in with_defaults"
+    );
+
+    // No LLM wired → expect Other("Claude client not configured").
+    let err = registry
+        .invoke(
+            "ingest_bill_pdf",
+            "test:user",
+            pool.clone(),
+            vec![ObjectRef::new("utility_account", account_id)],
+            json!({ "pdf_base64": "ZGVmaW5pdGVseS1ub3QtYS1wZGY=" }),
+        )
+        .await
+        .expect_err("action should error without an LLM");
+    let msg = err.to_string();
+    assert!(
+        msg.to_lowercase().contains("claude"),
+        "expected LLM-not-configured error, got: {msg}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires a live TimescaleDB — run via `cargo test -- --ignored`"]
 async fn schedule_maintenance_persists_event_and_row() {
     let Some(pool) = bootstrap_pool().await else {
         return;
