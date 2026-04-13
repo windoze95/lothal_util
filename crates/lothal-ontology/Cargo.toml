@@ -1,6 +1,6 @@
 [package]
 name = "lothal-ontology"
-description = "Palantir-style ontology layer for the lothal home efficiency ontology"
+description = "Homestead efficiency ontology"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

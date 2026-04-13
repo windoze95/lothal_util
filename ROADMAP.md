@@ -58,7 +58,7 @@ Example output:
 
 ### 2c. Reasoning Agent (build last — needs months of data)
 
-The Foundry/AIP piece. An agent that sits behind an **MCP server** exposing tools for:
+An agent that sits behind an **MCP server** exposing tools for:
 - Querying the ontology (bills by period, readings by device/time, weather data)
 - Running statistical functions (baseline computation, normalization)
 - Looking up rate schedules and computing costs
