@@ -86,6 +86,33 @@
       </div>
       {% endif %}
     </div>
+
+    <!-- Chat panel -->
+    <div class="bg-[#1a1d27] rounded-xl p-6 border border-[#2e3346] lg:col-span-2">
+      <h3 class="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider mb-4">Chat</h3>
+      <div id="chat-thread"
+           class="flex flex-col gap-3 max-h-96 overflow-y-auto mb-4 pr-1">
+      </div>
+      <form hx-post="/e/{{ kind }}/{{ id }}/chat"
+            hx-target="#chat-thread"
+            hx-swap="beforeend"
+            hx-disabled-elt="find input, find button"
+            hx-on::after-request="this.reset()"
+            class="flex gap-2">
+        <input
+          type="text"
+          name="message"
+          required
+          placeholder="Ask about {{ display_name }}..."
+          autocomplete="off"
+          class="flex-1 px-3 py-2 rounded-lg bg-[#0f1117] border border-[#2e3346] text-sm text-[#e8eaed] placeholder:text-[#555a6e] focus:outline-none focus:border-[#4f9cf7] disabled:opacity-50" />
+        <button
+          type="submit"
+          class="px-4 py-2 rounded-lg bg-[#4f9cf7] text-white text-sm font-medium hover:bg-[#3b82f6] transition-colors disabled:opacity-50">
+          Send
+        </button>
+      </form>
+    </div>
   </div>
 </div>
 
