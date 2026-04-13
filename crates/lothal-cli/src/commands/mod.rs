@@ -10,6 +10,7 @@ pub mod geometry;
 pub mod ingest;
 pub mod init;
 pub mod livestock;
+pub mod ontology;
 pub mod property;
 pub mod query;
 pub mod recommend;
