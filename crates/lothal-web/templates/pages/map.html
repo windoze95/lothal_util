@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% block title %}Map{% endblock %}
+{% block content %}
+<div class="space-y-4" x-data="{ drawerOpen: false }">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between flex-wrap gap-3">
+    <h2 class="text-xl font-semibold text-white">Property Map</h2>
+    <span class="text-xs text-[#555a6e] font-mono">{{ site_name }}</span>
+  </div>
+
+  <!-- Layer toggles + map shell -->
+  <div class="relative bg-[#1a1d27] rounded-xl border border-[#2e3346] overflow-hidden">
+    <!-- Layer toggle pills (top-left) -->
+    <div class="absolute top-3 left-3 z-10 flex flex-wrap gap-2">
+      <button type="button"
+              id="layer-toggle-site"
+              data-layer="site"
+              class="px-3 py-1.5 text-xs rounded-full border border-[#2e3346] bg-[#232736]/95 text-[#e8eaed] hover:border-[#4f9cf7] transition-colors">
+        Boundary
+      </button>
+      <button type="button"
+              id="layer-toggle-structures"
+              data-layer="structures"
+              class="px-3 py-1.5 text-xs rounded-full border border-[#2e3346] bg-[#232736]/95 text-[#e8eaed] hover:border-[#4f9cf7] transition-colors">
+        Structures
+      </button>
+      <button type="button"
+              id="layer-toggle-zones"
+              data-layer="zones"
+              class="px-3 py-1.5 text-xs rounded-full border border-[#2e3346] bg-[#232736]/95 text-[#e8eaed] hover:border-[#4f9cf7] transition-colors">
+        Zones
+      </button>
+      <!-- Future-proofed layers — greyed out until data is wired in. -->
+      <button type="button" disabled
+              class="px-3 py-1.5 text-xs rounded-full border border-[#2e3346] bg-[#232736]/60 text-[#555a6e] cursor-not-allowed">
+        Devices
+      </button>
+      <button type="button" disabled
+              class="px-3 py-1.5 text-xs rounded-full border border-[#2e3346] bg-[#232736]/60 text-[#555a6e] cursor-not-allowed">
+        Circuits
+      </button>
+    </div>
+
+    <svg id="property-map" viewBox="0 0 1200 700"
+         class="w-full bg-[#0f1117]"
+         style="height: 700px">
+    </svg>
+  </div>
+
+  <!-- Right-side detail drawer (populated by htmx on feature click) -->
+  <div x-show="drawerOpen"
+       x-transition.opacity
+       @click.self="drawerOpen = false"
+       class="fixed inset-0 z-40 bg-black/40"
+       style="display: none">
+    <aside class="absolute right-0 top-0 bottom-0 w-full sm:w-[480px] bg-[#1a1d27] border-l border-[#2e3346] overflow-y-auto"
+           @click.stop>
+      <div class="flex items-center justify-between px-5 py-4 border-b border-[#2e3346]">
+        <h3 class="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider">Feature Detail</h3>
+        <button type="button"
+                @click="drawerOpen = false"
+                class="text-[#8b8fa3] hover:text-white">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div id="map-drawer-body" class="p-5 text-sm text-[#8b8fa3]">
+        Select a feature on the map to see its details.
+      </div>
+    </aside>
+  </div>
+</div>
+
+<!--
+  Inline GeoJSON. The Rust handler serializes a FeatureCollection; we wrap it
+  in a JSON script tag so the browser parses it with JSON.parse (no HTML-in-JS
+  quote escaping drama).
+-->
+<script id="map-geojson" type="application/json">{{ geojson|safe }}</script>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js" defer></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    var raw = document.getElementById('map-geojson');
+    var fc;
+    try { fc = JSON.parse(raw ? raw.textContent : '{}'); } catch (e) { fc = { type: 'FeatureCollection', features: [] }; }
+    if (typeof d3 === 'undefined') { return; }
+    renderMap(fc);
+  });
+
+  var LAYER_STATE = { site: true, structures: true, zones: true };
+
+  function renderMap(fc) {
+    var svg = d3.select('#property-map');
+    svg.selectAll('*').remove();
+    var width = 1200, height = 700;
+
+    var features = (fc && fc.features) || [];
+    if (features.length === 0) {
+      svg.append('text').attr('x', width / 2).attr('y', height / 2)
+        .attr('text-anchor', 'middle').attr('fill', '#555a6e').attr('font-size', 16)
+        .text('No geometry — import a boundary with `lothal geometry import`.');
+      return;
+    }
+
+    // Fit a d3-geo mercator projection to the site boundary when available,
+    // falling back to the full collection.
+    var boundary = features.filter(function (f) { return propLayer(f) === 'site'; });
+    var fitTarget = boundary.length > 0
+      ? { type: 'FeatureCollection', features: boundary }
+      : fc;
+    var projection = d3.geoMercator().fitSize([width, height], fitTarget);
+    var path = d3.geoPath(projection);
+
+    // Groups by layer so toggles can show/hide cleanly.
+    var gSite = svg.append('g').attr('class', 'layer-site');
+    var gStructures = svg.append('g').attr('class', 'layer-structures');
+    var gZones = svg.append('g').attr('class', 'layer-zones');
+
+    features.forEach(function (feat) {
+      var layer = propLayer(feat);
+      var group = layer === 'site' ? gSite : layer === 'structures' ? gStructures : gZones;
+      var style = featureStyle(layer);
+      group.append('path')
+        .attr('d', path(feat))
+        .attr('fill', style.fill)
+        .attr('fill-opacity', style.fillOpacity)
+        .attr('stroke', style.stroke)
+        .attr('stroke-width', style.strokeWidth)
+        .attr('data-kind', (feat.properties && feat.properties.kind) || '')
+        .attr('data-id', (feat.properties && feat.properties.id) || '')
+        .style('cursor', 'pointer')
+        .on('mouseenter', function () { d3.select(this).attr('fill-opacity', style.fillOpacity + 0.15); })
+        .on('mouseleave', function () { d3.select(this).attr('fill-opacity', style.fillOpacity); })
+        .on('click', function () {
+          var k = (feat.properties && feat.properties.kind) || '';
+          var i = (feat.properties && feat.properties.id) || '';
+          if (k && i) { openDrawer(k, i); }
+        })
+        .append('title').text((feat.properties && feat.properties.name) || layer);
+    });
+
+    // Wire up the layer toggles.
+    ['site', 'structures', 'zones'].forEach(function (layer) {
+      var btn = document.getElementById('layer-toggle-' + layer);
+      if (!btn) { return; }
+      paintToggle(btn, LAYER_STATE[layer]);
+      btn.addEventListener('click', function () {
+        LAYER_STATE[layer] = !LAYER_STATE[layer];
+        paintToggle(btn, LAYER_STATE[layer]);
+        svg.select('.layer-' + layer).attr('display', LAYER_STATE[layer] ? null : 'none');
+      });
+    });
+  }
+
+  function propLayer(feat) { return (feat && feat.properties && feat.properties.layer) || ''; }
+
+  function featureStyle(layer) {
+    if (layer === 'site') {
+      return { fill: '#4f9cf7', fillOpacity: 0.08, stroke: '#4f9cf7', strokeWidth: 2 };
+    }
+    if (layer === 'structures') {
+      return { fill: '#f7c948', fillOpacity: 0.35, stroke: '#f7c948', strokeWidth: 1.5 };
+    }
+    return { fill: '#8ac926', fillOpacity: 0.25, stroke: '#8ac926', strokeWidth: 1.2 };
+  }
+
+  function paintToggle(btn, active) {
+    if (active) {
+      btn.classList.add('border-[#4f9cf7]');
+      btn.classList.remove('opacity-60');
+    } else {
+      btn.classList.remove('border-[#4f9cf7]');
+      btn.classList.add('opacity-60');
+    }
+  }
+
+  function openDrawer(kind, id) {
+    var root = document.querySelector('[x-data]');
+    // Flip Alpine state without re-querying Alpine's store.
+    try { root && root.__x && root.__x.$data && (root.__x.$data.drawerOpen = true); } catch (e) {}
+    // Fallback: toggle via a custom attribute Alpine watches.
+    var evt = new CustomEvent('open-drawer');
+    document.dispatchEvent(evt);
+    var body = document.getElementById('map-drawer-body');
+    body.innerHTML = '<div class="text-sm text-[#555a6e]">Loading&hellip;</div>';
+    fetch('/e/' + kind + '/' + id)
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        // Show a summary + link; the full entity page remains available.
+        body.innerHTML = '<p class="text-[#e8eaed] mb-3">Opening <code>' + kind + '</code> / <code>' + id + '</code></p>'
+          + '<a class="inline-block px-3 py-2 rounded-lg bg-[#232736] border border-[#2e3346] text-[#e8eaed] hover:border-[#4f9cf7]" href="/e/' + kind + '/' + id + '">Open full entity page &rarr;</a>';
+      })
+      .catch(function () { body.innerHTML = '<p class="text-[#f76c6c]">Failed to load entity.</p>'; });
+    // Also ensure drawer is visible; x-show reacts to drawerOpen in the root.
+    var container = document.querySelector('[x-data] > [x-show]');
+  }
+</script>
+{% endblock %}

@@ -242,3 +242,57 @@ pub struct EmptyStatePartial {
     pub title: &'static str,
     pub message: &'static str,
 }
+
+// ---------------------------------------------------------------------------
+// Universal entity page (W1)
+// ---------------------------------------------------------------------------
+
+/// A timeline event for the entity page.
+#[derive(Debug, Clone, Serialize)]
+pub struct TimelineEvent {
+    pub time: String,
+    pub kind: String,
+    pub summary: String,
+    pub severity: Option<String>,
+}
+
+/// A row describing a single property key/value pair, pretty-printed.
+#[derive(Debug, Clone, Serialize)]
+pub struct PropertyRow {
+    pub key: String,
+    pub value: String,
+    /// `true` when `value` is a formatted nested JSON block.
+    pub nested: bool,
+}
+
+#[derive(Template, WebTemplate)]
+#[template(path = "pages/entity.html")]
+pub struct EntityPage {
+    pub active_page: String,
+    pub site_name: String,
+    pub kind: String,
+    pub id: String,
+    pub display_name: String,
+    pub properties: Vec<PropertyRow>,
+    pub applicable_actions: Vec<String>,
+}
+
+#[derive(Template, WebTemplate)]
+#[template(path = "partials/entity_timeline.html")]
+pub struct EntityTimelinePartial {
+    pub events: Vec<TimelineEvent>,
+}
+
+// ---------------------------------------------------------------------------
+// Property map page (W4)
+// ---------------------------------------------------------------------------
+
+#[derive(Template, WebTemplate)]
+#[template(path = "pages/map.html")]
+pub struct MapPage {
+    pub active_page: String,
+    pub site_name: String,
+    /// Pre-serialized GeoJSON FeatureCollection string; embedded into the
+    /// page inline as a JS literal.
+    pub geojson: String,
+}

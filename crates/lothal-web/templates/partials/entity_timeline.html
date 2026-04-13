@@ -1,0 +1,23 @@
+{% if events.is_empty() %}
+<p class="text-sm text-[#555a6e]">No events recorded yet.</p>
+{% else %}
+<ul class="space-y-4">
+  {% for ev in events %}
+  <li class="relative pl-5 border-l border-[#2e3346]">
+    <span class="absolute -left-[5px] top-1.5 w-2 h-2 rounded-full
+                 {% match ev.severity %}
+                 {% when Some with (s) %}
+                    {% if s == "warning" %}bg-[#f7c948]
+                    {% else if s == "danger" %}bg-[#f76c6c]
+                    {% else %}bg-[#4f9cf7]{% endif %}
+                 {% when None %}bg-[#3dd68c]
+                 {% endmatch %}"></span>
+    <div class="flex items-baseline justify-between gap-2 flex-wrap">
+      <p class="text-sm text-[#e8eaed] break-words">{{ ev.summary }}</p>
+      <span class="text-xs text-[#555a6e] font-mono whitespace-nowrap">{{ ev.time }}</span>
+    </div>
+    <p class="text-xs text-[#8b8fa3] mt-0.5">{{ ev.kind }}</p>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}

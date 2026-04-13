@@ -10,6 +10,9 @@ pub enum WebError {
     #[error("Not found")]
     NotFound,
 
+    #[error("Bad request: {0}")]
+    BadRequest(String),
+
     #[error("{0}")]
     Internal(String),
 }
@@ -25,6 +28,7 @@ impl IntoResponse for WebError {
         let (status, message) = match &self {
             WebError::Database(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Database error"),
             WebError::NotFound => (StatusCode::NOT_FOUND, "Not found"),
+            WebError::BadRequest(_) => (StatusCode::BAD_REQUEST, "Bad request"),
             WebError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Internal error"),
         };
 

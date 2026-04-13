@@ -104,6 +104,27 @@ pub async fn update_zone_shape(
     Ok(result.rows_affected())
 }
 
+/// Read-only accessor: `(zone_id, name, kind, shape)` for every property zone on a site.
+///
+/// Rows with a `NULL` shape are skipped.
+pub async fn list_zone_shapes(
+    pool: &PgPool,
+    site_id: Uuid,
+) -> Result<Vec<(Uuid, String, String, serde_json::Value)>, sqlx::Error> {
+    let rows: Vec<(Uuid, String, String, Option<serde_json::Value>)> = sqlx::query_as(
+        "SELECT id, name, kind, shape FROM property_zones
+         WHERE site_id = $1 AND shape IS NOT NULL
+         ORDER BY name",
+    )
+    .bind(site_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|(id, name, kind, shape)| shape.map(|s| (id, name, kind, s)))
+        .collect())
+}
+
 pub async fn update_property_zone(
     pool: &PgPool,
     zone: &PropertyZone,
