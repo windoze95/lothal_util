@@ -1,7 +1,8 @@
 use axum::extract::State;
 use axum::routing::get;
 use axum::Router;
-use chrono::NaiveDate;
+
+use lothal_ontology::ObjectUri;
 
 use crate::charts;
 use crate::error::WebError;
@@ -11,11 +12,6 @@ use crate::templates::*;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(pulse))
-        .route("/energy", get(energy))
-        .route("/water", get(water))
-        .route("/property", get(property))
-        .route("/land", get(land))
-        .route("/lab", get(lab))
         .route("/bills", get(bills))
 }
 
@@ -60,6 +56,27 @@ async fn all_bills_for_site(
 // Pulse (Home)
 // ---------------------------------------------------------------------------
 
+/// Three actions surfaced inline on the Pulse page. Order matters — this is
+/// the order they render. Each entry is `(action_name, label, description)`
+/// and maps to a short inline form whose inputs are defined in the template.
+const PULSE_ACTION_CARDS: &[(&str, &str, &str)] = &[
+    (
+        "record_observation",
+        "Record observation",
+        "Attach a free-text note to the site.",
+    ),
+    (
+        "scoped_briefing",
+        "Scoped briefing",
+        "LLM briefing over the site's ontology slice.",
+    ),
+    (
+        "run_diagnostic",
+        "Run diagnostic",
+        "Root-cause hypothesis for a circuit or device.",
+    ),
+];
+
 async fn pulse(State(state): State<AppState>) -> Result<PulsePage, WebError> {
     let site = first_site(&state.pool).await?;
     let name = site_name(&site);
@@ -92,7 +109,7 @@ async fn pulse(State(state): State<AppState>) -> Result<PulsePage, WebError> {
                 unit: "kWh",
                 trend: ctx.baseline_comparison.as_ref().map(|b| b.deviation_pct),
                 color: "energy",
-                href: "/energy",
+                href: "/",
             });
         }
         if let Some(cost) = ctx.estimated_cost {
@@ -112,7 +129,7 @@ async fn pulse(State(state): State<AppState>) -> Result<PulsePage, WebError> {
                 unit: "F",
                 trend: None,
                 color: "heat",
-                href: "/energy",
+                href: "/",
             });
         }
         if let Some(ref lv) = ctx.livestock_summary {
@@ -122,7 +139,7 @@ async fn pulse(State(state): State<AppState>) -> Result<PulsePage, WebError> {
                 unit: "",
                 trend: None,
                 color: "bio",
-                href: "/land",
+                href: "/",
             });
         }
     }
@@ -146,7 +163,7 @@ async fn pulse(State(state): State<AppState>) -> Result<PulsePage, WebError> {
             alerts.push(Alert {
                 message: msg,
                 severity: if sep.is_overdue { AlertSeverity::Danger } else { AlertSeverity::Warning },
-                href: Some("/water".into()),
+                href: None,
             });
         }
     }
@@ -173,6 +190,59 @@ async fn pulse(State(state): State<AppState>) -> Result<PulsePage, WebError> {
         None
     };
 
+    // Recent events across the site (last 7 days, top 10).
+    let recent_events = if let Some(sid) = site_id {
+        let site_uri = ObjectUri::new("site", sid);
+        let now = chrono::Utc::now();
+        let start = now - chrono::Duration::days(7);
+        match lothal_ontology::query::events_for(&state.pool, &[site_uri], start, now, None).await {
+            Ok(events) => events
+                .into_iter()
+                .take(10)
+                .map(|ev| {
+                    // If the event has subjects, link to the first subject's entity page.
+                    let href = ev
+                        .subjects
+                        .0
+                        .first()
+                        .and_then(|v| {
+                            let kind = v.get("kind").and_then(|k| k.as_str())?;
+                            let id = v.get("id").and_then(|i| i.as_str())?;
+                            Some(format!("/e/{kind}/{id}"))
+                        });
+                    EventListEntry {
+                        time: ev.time.format("%b %d %H:%M").to_string(),
+                        kind: ev.kind,
+                        summary: ev.summary,
+                        severity: ev.severity,
+                        href,
+                    }
+                })
+                .collect(),
+            Err(_) => Vec::new(),
+        }
+    } else {
+        Vec::new()
+    };
+
+    // Inline action cards (only meaningful when a site exists — each form
+    // posts to /e/site/{site_id}/actions/{name}).
+    let action_cards = if let Some(sid) = site_id {
+        let registry_actions = state.registry.list();
+        PULSE_ACTION_CARDS
+            .iter()
+            .filter(|(name, _, _)| registry_actions.iter().any(|a| a.name() == *name))
+            .map(|(name, label, desc)| PulseActionCard {
+                name: (*name).to_string(),
+                label: (*label).to_string(),
+                description: (*desc).to_string(),
+                site_id: sid.to_string(),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
     Ok(PulsePage {
         active_page: "pulse".into(),
         site_name: name,
@@ -182,6 +252,9 @@ async fn pulse(State(state): State<AppState>) -> Result<PulsePage, WebError> {
         alerts,
         experiments,
         top_recommendation,
+        recent_events,
+        action_cards,
+        site_href: site_id.map(|sid| format!("/e/site/{sid}")),
     })
 }
 
@@ -247,231 +320,6 @@ pub async fn build_recommendations(
 }
 
 // ---------------------------------------------------------------------------
-// Energy
-// ---------------------------------------------------------------------------
-
-async fn energy(State(state): State<AppState>) -> Result<EnergyPage, WebError> {
-    let site = first_site(&state.pool).await?;
-    let name = site_name(&site);
-
-    let yesterday = chrono::Local::now().date_naive() - chrono::Duration::days(1);
-
-    let (total_kwh, circuits) = if let Some(ref s) = site {
-        let ctx = lothal_ai::briefing::context::gather_context(&state.pool, s.id, yesterday)
-            .await
-            .ok();
-        let kwh = ctx.as_ref().and_then(|c| c.total_kwh).unwrap_or(0.0);
-        let circs: Vec<CircuitSummary> = ctx
-            .as_ref()
-            .map(|c| {
-                c.circuit_anomalies
-                    .iter()
-                    .map(|a| CircuitSummary {
-                        label: a.circuit_label.clone(),
-                        kwh_today: a.actual_hours,
-                        pct_of_total: if kwh > 0.0 { (a.actual_hours / kwh) * 100.0 } else { 0.0 },
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        (kwh, circs)
-    } else {
-        (0.0, Vec::new())
-    };
-
-    let usage_chart = charts::to_chart_json(&charts::energy_usage_chart(vec![], vec![], vec![]));
-    let circuit_labels: Vec<String> = circuits.iter().map(|c| c.label.clone()).collect();
-    let circuit_values: Vec<f64> = circuits.iter().map(|c| c.kwh_today).collect();
-    let circuit_chart = charts::to_chart_json(&charts::circuit_breakdown_chart(circuit_labels, circuit_values));
-
-    Ok(EnergyPage {
-        active_page: "energy".into(),
-        site_name: name,
-        total_kwh_today: total_kwh,
-        estimated_cost_today: total_kwh * 0.11,
-        circuits,
-        usage_chart,
-        circuit_chart,
-        baseline_r_squared: None,
-        baseline_slope: None,
-        baseline_intercept: None,
-    })
-}
-
-// ---------------------------------------------------------------------------
-// Water
-// ---------------------------------------------------------------------------
-
-async fn water(State(state): State<AppState>) -> Result<WaterPage, WebError> {
-    let site = first_site(&state.pool).await?;
-    let name = site_name(&site);
-
-    let (pools, septic) = if let Some(ref s) = site {
-        let p: Vec<PoolDisplay> = lothal_db::water::list_pools_by_site(&state.pool, s.id)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|pool| PoolDisplay {
-                name: pool.name,
-                volume_gallons: pool.volume_gallons.value(),
-                pump_runtime_hours: None,
-                last_chlorine_ppm: None,
-                last_ph: None,
-                last_temp_f: None,
-            })
-            .collect();
-        let sep = lothal_db::water::get_septic_system(&state.pool, s.id)
-            .await
-            .unwrap_or(None)
-            .map(|sep| SepticDisplay {
-                tank_capacity_gallons: sep.tank_capacity_gallons.map(|g| g.value()).unwrap_or(0.0),
-                days_until_pump: sep.days_until_pump().unwrap_or(999),
-                is_overdue: sep.days_until_pump().is_some_and(|d| d < 0),
-                daily_load_estimate: sep.daily_load_estimate_gallons,
-            });
-        (p, sep)
-    } else {
-        (Vec::new(), None)
-    };
-
-    let has_water_data = !pools.is_empty() || septic.is_some();
-
-    Ok(WaterPage {
-        active_page: "water".into(),
-        site_name: name,
-        pools,
-        septic,
-        has_water_data,
-    })
-}
-
-// ---------------------------------------------------------------------------
-// Property
-// ---------------------------------------------------------------------------
-
-async fn property(State(state): State<AppState>) -> Result<PropertyPage, WebError> {
-    let site = first_site(&state.pool).await?;
-    let name = site_name(&site);
-
-    let zones = if let Some(ref s) = site {
-        lothal_db::property_zone::list_property_zones_by_site(&state.pool, s.id)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|z| ZoneDisplay {
-                id: z.id.to_string(),
-                name: z.name.clone(),
-                kind: format!("{:?}", z.kind),
-                area_sqft: z.area_sqft.map(|a| a.value()),
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
-
-    Ok(PropertyPage {
-        active_page: "property".into(),
-        site_name: name,
-        zones,
-    })
-}
-
-// ---------------------------------------------------------------------------
-// Land
-// ---------------------------------------------------------------------------
-
-async fn land(State(state): State<AppState>) -> Result<LandPage, WebError> {
-    let site = first_site(&state.pool).await?;
-    let name = site_name(&site);
-    let today = chrono::Local::now().date_naive();
-
-    let (flocks, garden_beds) = if let Some(ref s) = site {
-        let fl = lothal_db::livestock::list_flocks_by_site(&state.pool, s.id)
-            .await
-            .unwrap_or_default();
-        let mut flock_displays = Vec::new();
-        for f in &fl {
-            let summary = lothal_db::livestock::get_flock_daily_summary(&state.pool, f.id, today)
-                .await
-                .unwrap_or_default();
-            flock_displays.push(FlockDisplay {
-                name: f.name.clone(),
-                breed: f.breed.clone(),
-                bird_count: f.bird_count,
-                eggs_today: summary.eggs,
-                feed_today_lbs: summary.feed_lbs,
-                status: format!("{:?}", f.status),
-            });
-        }
-
-        let gb: Vec<GardenBedDisplay> = lothal_db::garden::list_garden_beds_by_site(&state.pool, s.id)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|b| GardenBedDisplay {
-                name: b.name.clone(),
-                bed_type: format!("{:?}", b.bed_type),
-                area_sqft: b.area_sqft.map(|a| a.value()),
-                active_plantings: 0,
-            })
-            .collect();
-        (flock_displays, gb)
-    } else {
-        (Vec::new(), Vec::new())
-    };
-
-    let has_livestock = !flocks.is_empty();
-    let has_garden = !garden_beds.is_empty();
-
-    Ok(LandPage {
-        active_page: "land".into(),
-        site_name: name,
-        flocks,
-        garden_beds,
-        has_livestock,
-        has_garden,
-    })
-}
-
-// ---------------------------------------------------------------------------
-// Lab
-// ---------------------------------------------------------------------------
-
-async fn lab(State(state): State<AppState>) -> Result<LabPage, WebError> {
-    let site = first_site(&state.pool).await?;
-    let name = site_name(&site);
-    let site_id = site.as_ref().map(|s| s.id);
-
-    let recommendations = if let Some(sid) = site_id {
-        build_recommendations(&state.pool, sid).await.unwrap_or_default()
-    } else {
-        Vec::new()
-    };
-
-    let experiments: Vec<ExperimentSummary> = if let Some(sid) = site_id {
-        lothal_db::experiment::list_experiments_by_site(&state.pool, sid)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|e| ExperimentSummary {
-                title: format!("Experiment {}", e.id.to_string().get(..8).unwrap_or("?")),
-                status: format!("{:?}", e.status),
-                days_active: 0,
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
-
-    Ok(LabPage {
-        active_page: "lab".into(),
-        site_name: name,
-        recommendations,
-        experiments,
-    })
-}
-
-// ---------------------------------------------------------------------------
 // Bills
 // ---------------------------------------------------------------------------
 
@@ -507,4 +355,3 @@ async fn bills(State(state): State<AppState>) -> Result<BillsPage, WebError> {
         bills_chart,
     })
 }
-

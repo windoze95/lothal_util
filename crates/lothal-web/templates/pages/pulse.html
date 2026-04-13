@@ -44,6 +44,13 @@
     {% when None %}
     <p class="text-[#555a6e] italic">No briefing generated yet. Run <code class="text-[#4f9cf7]">lothal ai briefing</code> to create one.</p>
     {% endmatch %}
+    {% match site_href %}
+    {% when Some with (href) %}
+    <div class="mt-4 text-xs">
+      <a href="{{ href }}" class="text-[#4f9cf7] hover:underline">Site overview &rarr;</a>
+    </div>
+    {% when None %}
+    {% endmatch %}
   </div>
 
   <!-- Stat cards -->
@@ -55,13 +62,109 @@
   </div>
   {% endif %}
 
+  <!-- Middle row: events stream + inline actions -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Recent events -->
+    <div class="bg-[#1a1d27] rounded-xl p-6 border border-[#2e3346]">
+      <h3 class="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider mb-4">Recent Events</h3>
+      {% if recent_events.is_empty() %}
+      <p class="text-sm text-[#555a6e]">No events in the last 7 days.</p>
+      {% else %}
+      <ul class="divide-y divide-[#2e3346]">
+        {% for ev in &recent_events %}
+        <li class="py-2.5">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="flex items-center gap-2 mb-0.5">
+                <span class="text-xs font-mono text-[#8b8fa3]">{{ ev.kind }}</span>
+                {% match ev.severity %}
+                {% when Some with (sev) %}
+                <span class="text-[10px] px-1.5 py-0.5 rounded-full
+                             {% if sev == "danger" %}bg-[#f76c6c]/15 text-[#f76c6c]
+                             {% else if sev == "warning" %}bg-[#f7c948]/15 text-[#f7c948]
+                             {% else %}bg-[#4f9cf7]/15 text-[#4f9cf7]{% endif %}
+                             uppercase tracking-wider">{{ sev }}</span>
+                {% when None %}
+                {% endmatch %}
+              </div>
+              <p class="text-sm text-[#e8eaed] truncate">
+                {% match ev.href %}
+                {% when Some with (link) %}
+                <a href="{{ link }}" class="hover:text-white hover:underline">{{ ev.summary }}</a>
+                {% when None %}
+                {{ ev.summary }}
+                {% endmatch %}
+              </p>
+            </div>
+            <span class="text-xs text-[#555a6e] flex-shrink-0 mt-0.5">{{ ev.time }}</span>
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+
+    <!-- Inline actions -->
+    <div class="bg-[#1a1d27] rounded-xl p-6 border border-[#2e3346]">
+      <h3 class="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider mb-4">Quick Actions</h3>
+      {% if action_cards.is_empty() %}
+      <p class="text-sm text-[#555a6e]">No site registered — quick actions will appear once you add one.</p>
+      {% else %}
+      <ul class="space-y-4">
+        {% for card in &action_cards %}
+        <li class="border-b border-[#2e3346]/50 pb-4 last:border-b-0 last:pb-0">
+          <div class="flex items-start justify-between mb-2">
+            <div>
+              <p class="text-sm font-medium text-[#e8eaed]">{{ card.label }}</p>
+              <p class="text-xs text-[#555a6e]">{{ card.description }}</p>
+            </div>
+          </div>
+          {% if card.name == "record_observation" %}
+          <form
+            hx-post="/e/site/{{ card.site_id }}/actions/{{ card.name }}"
+            hx-ext="json-enc"
+            hx-target="#pulse-action-result-{{ card.name }}"
+            hx-swap="innerHTML"
+            class="flex gap-2">
+            <input
+              type="text"
+              name="text"
+              placeholder="Observation text&hellip;"
+              required
+              class="flex-1 bg-[#0f1117] border border-[#2e3346] rounded-md px-3 py-1.5 text-sm text-[#e8eaed] focus:border-[#4f9cf7] focus:outline-none">
+            <button
+              type="submit"
+              class="px-3 py-1.5 rounded-md bg-[#232736] border border-[#2e3346] text-sm text-[#e8eaed] hover:border-[#4f9cf7] hover:bg-[#2e3346] transition-colors">
+              Record
+            </button>
+          </form>
+          {% else %}
+          <button
+            type="button"
+            hx-post="/e/site/{{ card.site_id }}/actions/{{ card.name }}"
+            hx-ext="json-enc"
+            hx-vals='{}'
+            hx-target="#pulse-action-result-{{ card.name }}"
+            hx-swap="innerHTML"
+            class="px-3 py-1.5 rounded-md bg-[#232736] border border-[#2e3346] text-sm text-[#e8eaed] hover:border-[#4f9cf7] hover:bg-[#2e3346] transition-colors">
+            Run
+          </button>
+          {% endif %}
+          <div id="pulse-action-result-{{ card.name }}" class="mt-2 min-h-[1rem]"></div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+  </div>
+
   <!-- Bottom row: experiments + top recommendation -->
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
     <!-- Active experiments -->
     <div class="bg-[#1a1d27] rounded-xl p-6 border border-[#2e3346]">
       <h3 class="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider mb-4">Active Experiments</h3>
       {% if experiments.is_empty() %}
-      <p class="text-sm text-[#555a6e]">No active experiments. Visit the <a href="/lab" class="text-[#4f9cf7] hover:underline">Lab</a> to start one.</p>
+      <p class="text-sm text-[#555a6e]">No active experiments.</p>
       {% else %}
       <ul class="space-y-3">
         {% for exp in &experiments %}
@@ -87,7 +190,6 @@
           <span>{{ format!("{:.1}", rec.payback_years) }}yr payback</span>
           <span>{{ format!("{:.0}", rec.confidence * 100.0) }}% confidence</span>
         </div>
-        <a href="/lab" class="inline-block mt-4 text-sm text-[#4f9cf7] hover:underline">View all recommendations &rarr;</a>
       </div>
       {% when None %}
       <p class="text-sm text-[#555a6e]">Add devices and bills to generate recommendations.</p>
