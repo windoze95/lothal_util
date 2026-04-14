@@ -4,18 +4,19 @@ pub mod signature;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::provider::LlmClient;
+use lothal_ontology::llm_function::LlmFunctionRegistry;
 use crate::AiError;
 
 /// Run NILM device identification on a circuit's readings.
 ///
-/// Extracts power signatures from the time-series data, classifies them with
-/// the LLM, and returns labeled results.
+/// Extracts power signatures from the time-series data, classifies them via
+/// the `nilm_label` [`LlmFunction`][lothal_ontology::LlmFunction] (Tier::Local),
+/// and stores labeled results.
 pub async fn identify_devices(
     pool: &PgPool,
     circuit_id: Uuid,
     window_days: u32,
-    provider: &LlmClient,
+    functions: &LlmFunctionRegistry,
 ) -> Result<Vec<label::DeviceLabel>, AiError> {
     let signatures =
         signature::extract_signatures(pool, circuit_id, window_days).await?;
@@ -30,7 +31,7 @@ pub async fn identify_devices(
         signatures.len()
     );
 
-    let labels = label::classify_signatures(&signatures, circuit_id, provider).await?;
+    let labels = label::classify_signatures(&signatures, circuit_id, functions, pool).await?;
 
     // Store labels in DB.
     for lbl in &labels {

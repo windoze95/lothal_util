@@ -2,8 +2,12 @@ pub mod anomaly;
 pub mod provider;
 pub mod extract;
 pub mod briefing;
+pub mod functions;
+pub mod invoker;
 pub mod mcp;
 pub mod nilm;
+
+pub use invoker::LlmClientInvoker;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AiError {

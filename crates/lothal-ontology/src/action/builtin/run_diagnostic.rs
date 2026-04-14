@@ -1,8 +1,8 @@
 //! `run_diagnostic` — LLM-driven root-cause hypothesis for a circuit or device.
 //!
 //! Pulls recent readings + anomaly events for the subject, hands both to the
-//! injected [`LlmCompleter`], parses a JSON response, and persists a
-//! `diagnosis` event.
+//! `diagnostic` [`LlmFunction`][crate::llm_function::LlmFunction] for
+//! reasoning, and persists a `diagnosis` event.
 
 use async_trait::async_trait;
 use serde_json::json;
@@ -17,20 +17,6 @@ pub struct RunDiagnostic;
 /// Max rows pulled for the prompt; balances context vs. token cost.
 const READINGS_LIMIT: i64 = 500;
 const DEFAULT_TIME_RANGE_HOURS: i64 = 72;
-const MAX_OUTPUT_TOKENS: u32 = 1024;
-
-const SYSTEM_PROMPT: &str = "\
-You are a home-energy diagnostician. Given a circuit or device, its recent \
-readings, and any anomaly events, produce the single most likely root-cause \
-hypothesis and the cheapest test that would confirm or rule it out.
-
-Respond ONLY with a JSON object matching this shape:
-{\"hypothesis\": \"...\", \"confidence\": \"low\"|\"medium\"|\"high\", \"test\": \"...\"}
-
-Rules:
-- Be concrete and reference specific numbers.
-- Prefer tests that need no new hardware.
-- If the data is too sparse to reason, return confidence \"low\" and propose the cheapest monitoring step.";
 
 #[async_trait]
 impl Action for RunDiagnostic {
@@ -74,10 +60,9 @@ impl Action for RunDiagnostic {
         ctx: &ActionCtx,
         input: serde_json::Value,
     ) -> Result<serde_json::Value, ActionError> {
-        let llm = ctx
-            .llm
-            .as_ref()
-            .ok_or_else(|| ActionError::Other(anyhow::anyhow!("Claude client not configured")))?;
+        let functions = ctx.llm_functions.as_ref().ok_or_else(|| {
+            ActionError::Other(anyhow::anyhow!("LlmFunctionRegistry not configured"))
+        })?;
 
         let subjects = subjects_from_input(&input)?;
         let subject = subjects
@@ -111,12 +96,23 @@ impl Action for RunDiagnostic {
         let anomaly_events = query::events_for(&ctx.pool, &[uri], t0, now, Some("anomaly")).await?;
         let prompt = build_prompt(&subject.kind, subject.id, &reading_rows, &anomaly_events, hours);
 
-        // Trait impl is responsible for schema enforcement (tool-use on
-        // Anthropic, prompt-injection for local LLMs).
-        let response = llm
-            .complete_json(SYSTEM_PROMPT, &prompt, MAX_OUTPUT_TOKENS, &self.output_schema())
+        let call = functions
+            .invoke(
+                "diagnostic",
+                &ctx.invoked_by,
+                ctx.pool.clone(),
+                json!({ "prompt": prompt }),
+                Some(ctx.run_id),
+                None,
+            )
             .await
-            .map_err(ActionError::Other)?;
+            .map_err(|e| ActionError::Other(anyhow::anyhow!("diagnostic function: {e}")))?;
+
+        let response = call
+            .output
+            .as_ref()
+            .map(|v| v.0.clone())
+            .ok_or_else(|| ActionError::Other(anyhow::anyhow!("diagnostic returned no output")))?;
 
         let hypothesis = required_response_str(&response, "hypothesis")?;
         let test = required_response_str(&response, "test")?;

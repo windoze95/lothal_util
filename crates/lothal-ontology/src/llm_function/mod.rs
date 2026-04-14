@@ -27,6 +27,7 @@ use async_trait::async_trait;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+pub mod builtin;
 pub mod run;
 
 pub use run::LlmCall;

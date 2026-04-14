@@ -1,9 +1,10 @@
 //! `scoped_briefing` — narrative summary of one entity's ontology slice.
 //!
 //! Uses the generic `query::get_object_view` to pull the subject, its direct
-//! neighbors, and its recent event timeline, then asks the injected
-//! [`LlmCompleter`] to write a short briefing about the slice. The returned
-//! text is stored as a `briefing_generated` event.
+//! neighbors, and its recent event timeline, then delegates to the
+//! `scoped_briefing` [`LlmFunction`][crate::llm_function::LlmFunction] for
+//! narrative generation. The returned text is stored as a
+//! `briefing_generated` event.
 
 use async_trait::async_trait;
 use serde_json::json;
@@ -15,14 +16,6 @@ use crate::{EventSpec, ObjectUri};
 use super::{subjects_from_input, truncate};
 
 pub struct ScopedBriefing;
-
-/// Upper bound on the model response. 4–6 sentences fit comfortably.
-const MAX_OUTPUT_TOKENS: u32 = 512;
-
-const SYSTEM_PROMPT: &str = "\
-You are a homestead ops briefing. Given the ontology slice below, produce a \
-4–6 sentence briefing about the subject, its neighbors, and recent events. \
-Lead with anything unusual. End with one actionable observation.";
 
 #[async_trait]
 impl Action for ScopedBriefing {
@@ -74,10 +67,9 @@ impl Action for ScopedBriefing {
         ctx: &ActionCtx,
         input: serde_json::Value,
     ) -> Result<serde_json::Value, ActionError> {
-        let llm = ctx
-            .llm
-            .as_ref()
-            .ok_or_else(|| ActionError::Other(anyhow::anyhow!("Claude client not configured")))?;
+        let functions = ctx.llm_functions.as_ref().ok_or_else(|| {
+            ActionError::Other(anyhow::anyhow!("LlmFunctionRegistry not configured"))
+        })?;
 
         let subjects = subjects_from_input(&input)?;
         let subject = subjects
@@ -105,10 +97,25 @@ impl Action for ScopedBriefing {
         .await?;
 
         let prompt = build_prompt(&view);
-        let briefing = llm
-            .complete_text(SYSTEM_PROMPT, &prompt, MAX_OUTPUT_TOKENS)
+        let call = functions
+            .invoke(
+                "scoped_briefing",
+                &ctx.invoked_by,
+                ctx.pool.clone(),
+                json!({ "prompt": prompt }),
+                Some(ctx.run_id),
+                None,
+            )
             .await
-            .map_err(ActionError::Other)?;
+            .map_err(|e| ActionError::Other(anyhow::anyhow!("scoped_briefing function: {e}")))?;
+
+        let briefing = call
+            .output
+            .as_ref()
+            .and_then(|v| v.0.get("briefing"))
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ActionError::Other(anyhow::anyhow!("scoped_briefing returned no briefing")))?
+            .to_string();
 
         let event_id = ctx
             .emit_event(EventSpec {

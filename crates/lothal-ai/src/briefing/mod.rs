@@ -5,27 +5,25 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use context::BriefingContext;
-use crate::provider::{CompletionRequest, LlmClient, Message, Role};
+use lothal_ontology::llm_function::LlmFunctionRegistry;
 use crate::AiError;
 
 /// When yesterday's usage deviates from the weather-normalized baseline by
-/// more than this fraction, switch to the "diagnose" briefing mode that
-/// enables extended thinking and asks the model to reason about cause.
+/// more than this fraction, switch to the `diagnose_briefing` function
+/// (extended thinking enabled) instead of the `calm_briefing` function.
 const DIAGNOSE_DEVIATION_THRESHOLD: f64 = 15.0;
 
-/// Extended-thinking budget used in diagnose mode.
-const DIAGNOSE_THINKING_BUDGET: u32 = 4000;
-
-/// Generate a daily briefing for a site.
+/// Generate a daily briefing for a site via the `LlmFunctionRegistry`.
 ///
-/// Uses a standard briefing prompt on calm days and switches to a "diagnose"
-/// prompt with extended thinking when yesterday's usage deviates from the
-/// weather-normalized baseline by more than 15%.
+/// Picks `calm_briefing` vs `diagnose_briefing` based on deviation from the
+/// weather-normalized baseline. Both prompts + budgets are declared by their
+/// respective [`LlmFunction`][lothal_ontology::LlmFunction] impls; this call
+/// site only picks the name and packages the prompt.
 pub async fn generate_briefing(
     pool: &PgPool,
     site_id: Uuid,
     date: chrono::NaiveDate,
-    provider: &LlmClient,
+    functions: &LlmFunctionRegistry,
 ) -> Result<String, AiError> {
     let ctx = context::gather_context(pool, site_id, date).await?;
     let prompt = build_briefing_prompt(&ctx);
@@ -36,78 +34,33 @@ pub async fn generate_briefing(
         .map(|b| b.deviation_pct.abs() > DIAGNOSE_DEVIATION_THRESHOLD)
         .unwrap_or(false);
 
-    let (system, max_tokens, budget_tokens) = if diagnose {
-        (DIAGNOSE_SYSTEM_PROMPT, 1024, Some(DIAGNOSE_THINKING_BUDGET))
-    } else {
-        (BRIEFING_SYSTEM_PROMPT, 512, None)
-    };
+    let function_name = if diagnose { "diagnose_briefing" } else { "calm_briefing" };
 
-    let request = CompletionRequest {
-        system: system.to_string(),
-        messages: vec![Message {
-            role: Role::User,
-            content: prompt,
-        }],
-        max_tokens,
-        temperature: 0.3,
-        budget_tokens,
-    };
+    let call = functions
+        .invoke(
+            function_name,
+            "briefing",
+            pool.clone(),
+            serde_json::json!({ "prompt": prompt }),
+            None,
+            None,
+        )
+        .await
+        .map_err(|e| AiError::LlmRequest(format!("{function_name}: {e}")))?;
 
-    let response = provider.complete(&request).await?;
+    let content = call
+        .output
+        .as_ref()
+        .and_then(|v| v.0.get("briefing"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AiError::LlmResponse("briefing function returned no `briefing`".into()))?
+        .to_string();
+    let model = call.model.clone().unwrap_or_default();
 
-    store_briefing(pool, site_id, date, &response.content, &ctx, &response.model).await?;
+    store_briefing(pool, site_id, date, &content, &ctx, &model).await?;
 
-    Ok(response.content)
+    Ok(content)
 }
-
-const BRIEFING_SYSTEM_PROMPT: &str = "\
-You are a property operations analyst producing a 5–8 sentence daily briefing \
-for a single property owner. The property is in Guthrie, Oklahoma — humid \
-subtropical climate, hot summers, mild winters, occasional severe weather.
-
-Rules:
-- Lead with the headline number: total kWh and estimated cost.
-- Compare to the weather-normalized baseline when available.
-- Call out any circuit anomalies with specific numbers.
-- Mention property operations that matter today: pool status, egg count, septic alerts, garden activity.
-- Flag maintenance due within 7 days.
-- If an active experiment is relevant to yesterday's data, mention it.
-- Be specific with numbers. Avoid vague words like \"notably\", \"slightly\", \"a bit\".
-- End with ONE actionable cross-system suggestion, or omit the end-line if nothing actionable surfaces.
-- Do not invent data. If a field is missing, omit it silently.
-
-Example briefings for calm days:
-
-Example 1:
-\"Yesterday used 28.4 kWh ($3.12), 4% below the weather-normalized baseline of 29.6 kWh. Pool pump ran 6.2h (normal). Flock produced 4 eggs, consumed 1.8 lb feed. Septic pump-out due in 47 days. No anomalies. Worth replacing the coop heat lamp bulb next time you're in the feed store — current one is at 850 of its rated 1000 hours.\"
-
-Example 2:
-\"Yesterday used 41.7 kWh ($4.59), 8% above the baseline of 38.5 kWh on a 92°F day (CDD 27). Kitchen branch ran 18% above its 14-day average — likely the oven from the Sunday meal prep. Pool held 82°F, pump 8.1h. 3 eggs collected. No maintenance due this week.\"
-
-Example 3:
-\"Yesterday used 12.3 kWh ($1.35) on a mild 68°F day, right at baseline. Pool pump ran 5.5h. Flock: 4 eggs, 1.5 lb feed, no incidents. Active experiment 'setback thermostat schedule' is in day 4/14 — early signs show 6% savings on HVAC circuit.\"";
-
-const DIAGNOSE_SYSTEM_PROMPT: &str = "\
-You are a property operations analyst investigating a meaningful deviation \
-from yesterday's weather-normalized energy baseline. The property is in \
-Guthrie, Oklahoma.
-
-Your job: produce a briefing that (a) states the deviation plainly, (b) \
-reasons through the 2–3 most likely causes using the circuit-level data, \
-weather, and active experiments, and (c) proposes the cheapest next step to \
-confirm or rule out the most likely cause.
-
-Rules:
-- Lead with the headline: actual vs predicted kWh and the percentage deviation.
-- Then diagnose. Be concrete — reference specific circuits and numbers.
-- If an active experiment could explain the deviation, mention it before blaming a device.
-- Distinguish 'a known cause' (experiment, heat wave, holiday) from 'an unexplained anomaly'.
-- For unexplained anomalies, propose the cheapest diagnostic test — not a fix.
-- 6–10 sentences. Be specific with numbers. Don't hedge with vague language.
-
-Example diagnose briefing:
-
-\"Yesterday used 52.1 kWh ($5.73), 22% above the weather-normalized baseline of 42.7 kWh on a 96°F day (CDD 31). The pool pump circuit ran 11.3h vs its 6.8h 14-day average — accounts for roughly 4.5 kWh of the 9.4 kWh overage. The HVAC circuit was only 4% high, consistent with the temperature. Active experiment 'pool cover on when not swimming' is suspended this week per your note — likely related. Cheapest check: verify the pool pump schedule in Home Assistant didn't revert; the solar cover being off also roughly doubles evaporative heat loss so the pump may be compensating. If the schedule is correct, the next signal would be a temperature sensor on the return line to see whether the pump is actually cooling.\"";
 
 fn build_briefing_prompt(ctx: &BriefingContext) -> String {
     let mut sections = Vec::new();

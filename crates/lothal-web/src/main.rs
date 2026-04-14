@@ -31,7 +31,27 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("database connected and migrations applied");
 
     let (readings_tx, _) = tokio::sync::broadcast::channel::<ReadingEvent>(256);
-    let registry = std::sync::Arc::new(lothal_ontology::ActionRegistry::with_defaults(pool.clone()));
+
+    // Build the LlmFunctionRegistry if an LLM provider is configured. When it
+    // isn't (dev without API keys), action-triggered LLM calls will error
+    // gracefully at dispatch time.
+    let llm_functions = match lothal_ai::provider::LlmClient::from_env() {
+        Ok(client) => {
+            let invoker: std::sync::Arc<dyn lothal_ontology::llm_function::LlmInvoker> =
+                std::sync::Arc::new(lothal_ai::LlmClientInvoker::new(client));
+            Some(lothal_ai::functions::default_registry(invoker))
+        }
+        Err(e) => {
+            tracing::info!(error = %e, "LLM provider not configured — action-triggered LLM calls will error");
+            None
+        }
+    };
+
+    let mut action_registry = lothal_ontology::ActionRegistry::with_defaults(pool.clone());
+    if let Some(fns) = llm_functions.clone() {
+        action_registry = action_registry.with_llm_functions(fns);
+    }
+    let registry = std::sync::Arc::new(action_registry);
 
     // If MQTT_BROKER is set (and LOTHAL_MQTT_IN_WEB != "false"), run an
     // in-process subscriber so the web server can forward live readings over

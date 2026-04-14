@@ -1,14 +1,12 @@
-//! `ingest_bill_pdf` — decode a base64 PDF, shell out to `pdftotext`, ask the
-//! injected [`LlmCompleter`] for structured fields, and persist the resulting
-//! `Bill` + `BillLineItem` rows.
+//! `ingest_bill_pdf` — decode a base64 PDF, shell out to `pdftotext`, delegate
+//! to the `bill_extraction` [`LlmFunction`][crate::llm_function::LlmFunction]
+//! for structured-field extraction, and persist the resulting `Bill` +
+//! `BillLineItem` rows.
 //!
-//! The ontology crate cannot depend on `lothal-ai` or `lothal-db` (both of
-//! those already depend on `lothal-ontology`), so this action duplicates the
-//! bill-extraction JSON schema inline and inlines the subset of
-//! `lothal-db::bill::insert_bill` it needs via the local `indexer` helpers.
-//! The logic mirrors `lothal-ai::extract` and `lothal-ai::extract::email` by
-//! intent: same shell-out to `pdftotext -layout`, same prompt shape, same
-//! tool-use JSON schema.
+//! The ontology crate cannot depend on `lothal-db` (that would be a cycle),
+//! so this action inlines the subset of `lothal-db::bill::insert_bill` it
+//! needs via the local `indexer` helpers. The prompt + extraction schema
+//! live in the `bill_extraction` LLM function.
 
 use async_trait::async_trait;
 use chrono::NaiveDate;
@@ -27,24 +25,6 @@ pub struct IngestBillPdf;
 
 /// Hard cap on decoded PDF size to avoid hostile input blowing up memory.
 const MAX_DECODED_BYTES: usize = 10 * 1024 * 1024;
-
-/// Token budget for the LLM extraction response. Bills with long line-item
-/// tables still fit in ~2k tokens; see `lothal-ai::extract::schema`.
-const MAX_OUTPUT_TOKENS: u32 = 2048;
-
-const SYSTEM_PROMPT: &str = "\
-You are a utility bill data extraction assistant. Given the raw text extracted \
-from a utility bill PDF, extract all structured billing information accurately.
-
-Rules:
-- All dates must be in YYYY-MM-DD format.
-- All dollar amounts must be numeric (no $ signs).
-- Usage amounts must be numeric.
-- The line_items amounts MUST sum to total_amount (within $0.02).
-- Categorize each line item into the most appropriate category.
-- If a charge doesn't clearly fit a category, use 'other'.
-- For credits, use negative amounts.
-- Extract the provider name exactly as it appears on the bill.";
 
 #[async_trait]
 impl Action for IngestBillPdf {
@@ -98,10 +78,9 @@ impl Action for IngestBillPdf {
         ctx: &ActionCtx,
         input: serde_json::Value,
     ) -> Result<serde_json::Value, ActionError> {
-        let llm = ctx
-            .llm
-            .as_ref()
-            .ok_or_else(|| ActionError::Other(anyhow::anyhow!("Claude client not configured")))?;
+        let functions = ctx.llm_functions.as_ref().ok_or_else(|| {
+            ActionError::Other(anyhow::anyhow!("LlmFunctionRegistry not configured"))
+        })?;
 
         let subjects = subjects_from_input(&input)?;
         let account_ref = subjects.first().ok_or_else(|| {
@@ -134,15 +113,26 @@ impl Action for IngestBillPdf {
         let pdf_text = extract_text_from_mem(&pdf_bytes)
             .map_err(|e| ActionError::Other(anyhow::anyhow!("pdf parse failed: {e}")))?;
 
-        // 4. Ask the LLM for structured bill fields.
-        let prompt = format!(
-            "Extract the billing data from this utility bill ({utility_type}):\n\n\
-             ---\n{pdf_text}\n---"
-        );
-        let extracted: serde_json::Value = llm
-            .complete_json(SYSTEM_PROMPT, &prompt, MAX_OUTPUT_TOKENS, &bill_extraction_schema())
+        // 4. Delegate structured extraction to the `bill_extraction` LLM function.
+        let call = functions
+            .invoke(
+                "bill_extraction",
+                &ctx.invoked_by,
+                ctx.pool.clone(),
+                json!({
+                    "pdf_text": pdf_text,
+                    "utility_type": utility_type,
+                }),
+                Some(ctx.run_id),
+                None,
+            )
             .await
-            .map_err(|e| ActionError::Other(anyhow::anyhow!("LLM extraction failed: {e}")))?;
+            .map_err(|e| ActionError::Other(anyhow::anyhow!("bill_extraction function: {e}")))?;
+        let extracted: serde_json::Value = call
+            .output
+            .as_ref()
+            .map(|v| v.0.clone())
+            .ok_or_else(|| ActionError::Other(anyhow::anyhow!("bill_extraction returned no output")))?;
 
         // 5. Convert → typed Bill and persist in one transaction.
         let bill = build_bill_from_extraction(&extracted, account_ref.id, filename.as_deref())?;
@@ -258,49 +248,6 @@ fn extract_text_from_mem(bytes: &[u8]) -> anyhow::Result<String> {
         anyhow::bail!("pdftotext exited with {}: {stderr}", output.status);
     }
     String::from_utf8(output.stdout).map_err(|e| anyhow::anyhow!("pdftotext utf-8: {e}"))
-}
-
-/// Structured-output schema for the LLM. Mirrors
-/// `lothal-ai::extract::schema::bill_json_schema` so the two extraction paths
-/// stay aligned. Kept inline here because `lothal-ontology` can't depend on
-/// `lothal-ai`.
-fn bill_extraction_schema() -> serde_json::Value {
-    json!({
-        "type": "object",
-        "required": [
-            "period_start", "period_end", "statement_date",
-            "total_usage", "usage_unit", "total_amount", "line_items"
-        ],
-        "properties": {
-            "period_start":   {"type": "string", "description": "YYYY-MM-DD"},
-            "period_end":     {"type": "string", "description": "YYYY-MM-DD"},
-            "statement_date": {"type": "string", "description": "YYYY-MM-DD"},
-            "total_usage":    {"type": "number"},
-            "usage_unit":     {"type": "string", "description": "kWh, therms, or gallons"},
-            "total_amount":   {"type": "number"},
-            "line_items": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "required": ["description", "category", "amount"],
-                    "properties": {
-                        "description": {"type": "string"},
-                        "category": {
-                            "type": "string",
-                            "enum": [
-                                "base_charge", "energy_charge", "delivery_charge",
-                                "fuel_cost_adjustment", "demand_charge", "rider_charge",
-                                "tax", "fee", "credit", "other"
-                            ]
-                        },
-                        "amount": {"type": "number"},
-                        "usage": {"type": ["number", "null"]},
-                        "rate":  {"type": ["number", "null"]}
-                    }
-                }
-            }
-        }
-    })
 }
 
 /// Convert the LLM's JSON into a typed `Bill` with child `BillLineItem`s.

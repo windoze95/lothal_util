@@ -151,6 +151,9 @@ pub async fn briefing(pool: &PgPool, date_str: Option<&str>, output: &str) -> Re
     };
 
     let client = LlmClient::from_env()?;
+    let invoker: std::sync::Arc<dyn lothal_ontology::llm_function::LlmInvoker> =
+        std::sync::Arc::new(lothal_ai::LlmClientInvoker::new(client));
+    let functions = lothal_ai::functions::default_registry(invoker);
 
     let sites = lothal_db::site::list_sites(pool).await?;
     let site = sites
@@ -160,7 +163,7 @@ pub async fn briefing(pool: &PgPool, date_str: Option<&str>, output: &str) -> Re
     println!("Generating briefing for {} ({})", date, site.address);
 
     let content =
-        lothal_ai::briefing::generate_briefing(pool, site.id, date, &client).await?;
+        lothal_ai::briefing::generate_briefing(pool, site.id, date, &functions).await?;
 
     // Send to output target.
     if output == "stdout" {
@@ -262,6 +265,9 @@ pub async fn ingest_email(pool: &PgPool, once: bool) -> Result<()> {
 
 pub async fn identify(pool: &PgPool, circuit: &str, window: &str) -> Result<()> {
     let client = LlmClient::from_env()?;
+    let invoker: std::sync::Arc<dyn lothal_ontology::llm_function::LlmInvoker> =
+        std::sync::Arc::new(lothal_ai::LlmClientInvoker::new(client));
+    let functions = lothal_ai::functions::default_registry(invoker);
 
     let window_days: u32 = if window.ends_with('d') {
         window.trim_end_matches('d').parse().context("Invalid window")?
@@ -294,7 +300,7 @@ pub async fn identify(pool: &PgPool, circuit: &str, window: &str) -> Result<()> 
         println!("Analyzing circuit '{}' ({cid})...", label);
 
         let labels =
-            lothal_ai::nilm::identify_devices(pool, *cid, window_days, &client).await?;
+            lothal_ai::nilm::identify_devices(pool, *cid, window_days, &functions).await?;
 
         if labels.is_empty() {
             println!("  No power signatures detected");

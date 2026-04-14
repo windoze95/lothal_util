@@ -372,7 +372,11 @@ async fn run_daily_briefing(pool: &PgPool, site_id: &Uuid) -> Result<()> {
     let yesterday = Local::now().date_naive() - chrono::Duration::days(1);
 
     let client = LlmClient::from_env()?;
-    let content = lothal_ai::briefing::generate_briefing(pool, *site_id, yesterday, &client).await?;
+    let invoker: std::sync::Arc<dyn lothal_ontology::llm_function::LlmInvoker> =
+        std::sync::Arc::new(lothal_ai::LlmClientInvoker::new(client));
+    let functions = lothal_ai::functions::default_registry(invoker);
+    let content =
+        lothal_ai::briefing::generate_briefing(pool, *site_id, yesterday, &functions).await?;
 
     if let Ok(output) = BriefingOutput::from_env() {
         if let Err(e) = output.send(&content).await {

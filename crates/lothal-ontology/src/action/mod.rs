@@ -2,8 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use uuid::Uuid;
 
 use crate::{EventSpec, indexer};
+use crate::llm_function::LlmFunctionRegistry;
 
 pub mod builtin;
 pub mod run;
@@ -42,6 +44,16 @@ pub struct ActionCtx {
     /// `with_llm(..)`. LLM-dependent actions must error gracefully in that
     /// case rather than panic.
     pub llm: Option<Arc<dyn LlmCompleter>>,
+    /// Optional `LlmFunctionRegistry`. Actions that delegate to a named
+    /// [`crate::llm_function::LlmFunction`] (e.g. `run_diagnostic` →
+    /// `diagnostic`) call through this; functions invoked this way write an
+    /// `llm_calls` trace row with `parent_action_run_id` set to
+    /// [`ActionCtx::run_id`] so the two audit trails link.
+    pub llm_functions: Option<Arc<LlmFunctionRegistry>>,
+    /// The id of the `action_runs` row for the currently-executing action.
+    /// Populated by [`ActionRegistry::invoke`] before dispatch. Actions that
+    /// invoke an `LlmFunction` should pass this as `parent_action_run_id`.
+    pub run_id: Uuid,
 }
 
 impl ActionCtx {
@@ -94,6 +106,7 @@ pub trait Action: Send + Sync {
 pub struct ActionRegistry {
     actions: HashMap<&'static str, Arc<dyn Action>>,
     llm: Option<Arc<dyn LlmCompleter>>,
+    llm_functions: Option<Arc<LlmFunctionRegistry>>,
 }
 
 impl ActionRegistry {
@@ -128,6 +141,14 @@ impl ActionRegistry {
     /// in at registry construction time.
     pub fn with_llm(mut self, llm: Arc<dyn LlmCompleter>) -> Self {
         self.llm = Some(llm);
+        self
+    }
+
+    /// Attach an [`LlmFunctionRegistry`] so actions can delegate to named
+    /// LLM functions. The `lothal-ai` layer builds the function registry
+    /// (complete with a concrete `LlmInvoker`) and hands it in here.
+    pub fn with_llm_functions(mut self, functions: Arc<LlmFunctionRegistry>) -> Self {
+        self.llm_functions = Some(functions);
         self
     }
 
@@ -206,6 +227,8 @@ impl ActionRegistry {
             pool: pool.clone(),
             invoked_by: invoked_by.to_string(),
             llm: self.llm.clone(),
+            llm_functions: self.llm_functions.clone(),
+            run_id,
         };
         // 5. Finalize + emit completion/failure event.
         match action.run(&ctx, input_with_subjects).await {

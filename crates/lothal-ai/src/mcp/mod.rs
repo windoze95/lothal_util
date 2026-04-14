@@ -10,9 +10,18 @@ use crate::AiError;
 
 /// Build the action registry this server exposes — populated from
 /// `ActionRegistry::with_defaults` so registered actions surface as per-action
-/// tools in the MCP tool list automatically.
+/// tools in the MCP tool list automatically, and wired with an
+/// `LlmFunctionRegistry` so LLM-delegating actions (`run_diagnostic`,
+/// `scoped_briefing`, `ingest_bill_pdf`) can reach their functions.
 fn build_action_registry(pool: &PgPool) -> ActionRegistry {
-    ActionRegistry::with_defaults(pool.clone())
+    let mut reg = ActionRegistry::with_defaults(pool.clone());
+    if let Ok(client) = crate::provider::LlmClient::from_env() {
+        let invoker: std::sync::Arc<dyn lothal_ontology::llm_function::LlmInvoker> =
+            std::sync::Arc::new(crate::LlmClientInvoker::new(client));
+        let fns = crate::functions::default_registry(invoker);
+        reg = reg.with_llm_functions(fns);
+    }
+    reg
 }
 
 /// Run the MCP server, reading JSON-RPC requests from stdin and writing

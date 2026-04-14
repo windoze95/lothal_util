@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
 use uuid::Uuid;
 
+use lothal_ontology::llm_function::LlmFunctionRegistry;
+
 use super::signature::PowerSignature;
-use crate::provider::{CompletionRequest, LlmClient, Message, Role};
 use crate::AiError;
 
 /// A device label assigned by the LLM to a power signature.
@@ -30,13 +32,13 @@ struct ClassificationResponse {
     classifications: Vec<ClassificationResult>,
 }
 
-/// Classify a batch of power signatures using the LLM.
+/// Classify a batch of power signatures via the `nilm_label` LLM function.
 pub async fn classify_signatures(
     signatures: &[PowerSignature],
     circuit_id: Uuid,
-    provider: &LlmClient,
+    functions: &LlmFunctionRegistry,
+    pool: &PgPool,
 ) -> Result<Vec<DeviceLabel>, AiError> {
-    // Build a summary of signatures for the prompt.
     let sig_descriptions: Vec<String> = signatures
         .iter()
         .enumerate()
@@ -54,28 +56,37 @@ pub async fn classify_signatures(
         })
         .collect();
 
-    let request = CompletionRequest {
-        system: NILM_SYSTEM_PROMPT.to_string(),
-        messages: vec![Message {
-            role: Role::User,
-            content: format!(
-                "Classify these {} power signatures from a residential circuit:\n\n{}",
-                signatures.len(),
-                sig_descriptions.join("\n")
-            ),
-        }],
-        max_tokens: 2048,
-        temperature: 0.1,
-        budget_tokens: None,
-    };
+    let prompt = format!(
+        "Classify these {} power signatures from a residential circuit:\n\n{}",
+        signatures.len(),
+        sig_descriptions.join("\n")
+    );
 
-    let schema = classification_schema(signatures.len());
-    let raw = provider.complete_json(&request, &schema).await?;
+    let call = functions
+        .invoke(
+            "nilm_label",
+            "nilm",
+            pool.clone(),
+            serde_json::json!({
+                "signatures_prompt": prompt,
+                "signature_count": signatures.len(),
+            }),
+            None,
+            None,
+        )
+        .await
+        .map_err(|e| AiError::LlmRequest(format!("nilm_label: {e}")))?;
+
+    let raw = call
+        .output
+        .as_ref()
+        .map(|v| v.0.clone())
+        .ok_or_else(|| AiError::LlmResponse("nilm_label returned no output".into()))?;
 
     let response: ClassificationResponse = serde_json::from_value(raw)
         .map_err(|e| AiError::LlmResponse(format!("Failed to parse classification: {e}")))?;
 
-    let model_name = provider.model_name().to_string();
+    let model_name = call.model.clone().unwrap_or_default();
 
     let labels = response
         .classifications
@@ -93,52 +104,4 @@ pub async fn classify_signatures(
         .collect();
 
     Ok(labels)
-}
-
-const NILM_SYSTEM_PROMPT: &str = "\
-You are a Non-Intrusive Load Monitoring (NILM) expert. Given power signatures \
-from a residential electrical circuit, identify the most likely device type.
-
-Common residential device signatures:
-- HVAC compressor: 2000-5000W steady/cycling, long duration, correlates with temperature
-- Pool pump: 1000-3000W steady, long runs (6-12h), often scheduled
-- Water heater: 3500-5500W steady, 15-45min runs, random timing
-- Dryer: 2000-5000W steady with cycling, 30-60min
-- Oven/range: 2000-5000W variable, during meal times
-- Dishwasher: 1200-2400W cycling, evening
-- Washing machine: 300-500W variable, 30-60min
-- Refrigerator: 100-400W cycling, 15-30min on/off pattern, 24/7
-- EV charger: 1400-11500W steady, evening/night, long duration
-- Microwave: 1000-1800W steady, 1-10min burst
-- Hair dryer: 1000-1800W steady, 5-20min, morning
-- Space heater: 500-1500W steady, long runs
-
-Device kind values: hvac, pool_pump, water_heater, dryer, oven, dishwasher, \
-washer, refrigerator, ev_charger, microwave, lighting, fan, computer, \
-entertainment, small_appliance, unknown
-
-Respond with a confidence from 0.0 to 1.0. Be conservative — if you're unsure, \
-use 'unknown' with low confidence and explain what additional data would help.";
-
-fn classification_schema(count: usize) -> serde_json::Value {
-    serde_json::json!({
-        "type": "object",
-        "required": ["classifications"],
-        "properties": {
-            "classifications": {
-                "type": "array",
-                "minItems": count,
-                "maxItems": count,
-                "items": {
-                    "type": "object",
-                    "required": ["device_kind", "confidence", "reasoning"],
-                    "properties": {
-                        "device_kind": { "type": "string" },
-                        "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
-                        "reasoning": { "type": "string" }
-                    }
-                }
-            }
-        }
-    })
 }
