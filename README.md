@@ -17,7 +17,7 @@ Rust workspace with eight crates:
 | `lothal-db` | sqlx persistence layer — PostgreSQL + TimescaleDB, async CRUD, batch inserts, daily aggregation; every write-path repo emits ontology rows in the same transaction |
 | `lothal-ingest` | Data pipelines — PDF bill parsers (OG&E, ONG, Guthrie water), Green Button XML, MQTT subscriber (Emporia Vue / Home Assistant), NWS weather API, Flume water meter, Ecobee thermostat |
 | `lothal-engine` | Analytics — weather-normalized baselines, experiment evaluator, property-wide recommendation generator |
-| `lothal-ai` | AI layer — LLM bill extraction, daily briefings (via ontology context), MCP server (six generic ontology tools + per-action tools from registry), NILM device identification |
+| `lothal-ai` | AI layer — `LlmFunction` registry and concrete functions (briefings, entity chat, NILM, diagnostic, scoped briefing, bill extraction); two-tier provider router (Local/Frontier); `LlmClientInvoker` bridge to Anthropic + Ollama; MCP server (six generic ontology tools + per-action tools from registry) |
 | `lothal-cli` | CLI binary — onboarding, data management, querying, experiment tracking, recommendations, geometry import, ontology backfill |
 | `lothal-web` | Web dashboard — Axum + Askama + htmx, dark theme; universal entity page (`/e/{kind}/{id}`), property map (`/map`), Pulse dashboard, bills view; entity-scoped tool-enabled chat; WebSocket live readings |
 
@@ -163,6 +163,11 @@ Every domain entity implements `Describe` (kind, id, display_name, properties). 
 - **links** — typed, time-valid directed edges (`contained_in`, `issued_by`, `targets`, `powers`, …)
 - **events** — TimescaleDB hypertable; one row per happening (`anomaly`, `observation`, `maintenance_scheduled`, `diagnosis`, `briefing_generated`, …)
 - **action_runs** — audit log for every invoked action
+- **llm_calls** — audit log for every LLM invocation routed through `LlmFunctionRegistry`: function name, tier, `sha256(system_prompt)`, model, tokens, latency, optional `parent_action_run_id` and `thread_id`
+
+### LLM functions
+
+Every LLM call in the system is a declarative `LlmFunction` dispatched through `LlmFunctionRegistry::invoke`. Each function declares its system prompt, token budget, output schema, and [`ModelTier`] (`Local` → Ollama, `Frontier` → Anthropic); each call writes one `llm_calls` trace row with the prompt hash so prompt edits are diff-able against past behaviour without an eval framework. The chat loop records one trace row per tool-use round; LLM-delegating actions (`run_diagnostic`, `scoped_briefing`, `ingest_bill_pdf`) link their `action_runs.id` as `parent_action_run_id` so the two audit trails compose.
 
 ### Built-in actions
 
@@ -197,7 +202,7 @@ Default port is 5433 (avoids conflict with other local Postgres instances).
 - Rust 1.85+
 - Docker (for TimescaleDB)
 - `poppler` (`pdftotext` binary) for PDF bill parsing
-- `ANTHROPIC_API_KEY` for AI features (briefings, diagnostics, bill extraction)
+- At least one LLM provider configured for AI features — `ANTHROPIC_API_KEY` (frontier tier: briefings, chat, diagnostics, bill extraction) and/or Ollama via `OLLAMA_BASE_URL` (local tier: NILM classification). Each tier is selected via `LOTHAL_FRONTIER_PROVIDER` / `LOTHAL_LOCAL_PROVIDER`; see `.env.example`.
 
 ## License
 

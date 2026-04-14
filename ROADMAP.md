@@ -104,17 +104,24 @@ Emporia gives per-circuit watts but doesn't know what's running. Classical signa
 - **Bill math** — LLM extracts, code validates. Models confidently round things.
 - **Forecasting** — Prophet/ARIMA/seasonal-naive beats an LLM on time-series and costs nothing.
 
-### 2e. Model Router (planned)
+### 2e. LlmFunction primitive + Model Router -- IMPLEMENTED
 
-**Problem:** `LlmClient::from_env()` picks one provider per process. The guiding principle says "local models for narrow/frequent tasks, frontier models for complex/rare reasoning" — but the code doesn't enforce this. You either run everything through Ollama or everything through Claude.
+**Problem:** Every LLM call in the system carried its own prompt constants, its own max_tokens, its own model pick — briefings, `run_diagnostic`, `ingest_bill_pdf`, and the chat loop each duplicated the plumbing. The chat handler even bypassed `LlmClient` entirely and hardcoded the Anthropic HTTP request. No central trace, no per-function routing, no prompt versioning.
 
-**Solution:** Replace the single-provider `LlmClient` with a routing layer that picks the model per task based on complexity.
+**Solution:** An AIP-Logic-shaped primitive. `LlmFunction` declares name, system prompt, tier, token budget, and schema; `LlmFunctionRegistry::invoke` writes one `llm_calls` audit row per call with `sha256(system_prompt)`, model, tokens, latency, and nullable links to a parent action run or chat thread.
 
-- Each AI surface declares its tier: `Tier::Local` (bill parsing, briefings, NILM) or `Tier::Frontier` (MCP reasoning agent, hypothesis generation, complex maintenance diagnosis)
-- Router maps tiers to configured providers: local → Ollama/Gemma, frontier → Anthropic/Claude
-- Fallback chain: if the preferred provider for a tier is unavailable, try the other
-- Single configuration point: `LOTHAL_LOCAL_PROVIDER`, `LOTHAL_FRONTIER_PROVIDER` (or both set to the same provider for single-model setups)
-- Cost tracking: log token usage per tier so you can see what the frontier model is actually costing
+Every LLM call in the system now flows through the registry:
+
+- `calm_briefing` / `diagnose_briefing` (split along the deviation threshold, Tier::Frontier)
+- `diagnostic`, `scoped_briefing`, `bill_extraction` (Tier::Frontier, invoked by their paired actions)
+- `nilm_label` (Tier::Local — first declared non-frontier function)
+- `entity_chat` (Tier::Frontier; one trace row per tool-use round, tool dispatch stays in the web handler)
+
+**Model routing:** `LlmClient` holds both tiers; env reads `LOTHAL_LOCAL_PROVIDER` + `LOTHAL_FRONTIER_PROVIDER` (legacy `LOTHAL_LLM_PROVIDER` honoured as a frontier-tier fallback). Calls fall back across tiers if only one is configured.
+
+**Observability:** `llm_calls.prompt_hash` gives free prompt versioning — when a prompt changes the hash changes, and behaviour across hashes is diff-able from the event log. No eval-dataset framework required for a single operator.
+
+**Explicitly deferred** (Palantir-AIP concepts that don't earn their keep for a solo operator): Agent Studio UI, thread persistence activation (hook reserved as nullable `thread_id`), prompt-eval framework, write-action approval workflows, branching/workspace isolation.
 
 ---
 
