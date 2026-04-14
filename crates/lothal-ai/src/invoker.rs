@@ -10,7 +10,9 @@
 
 use async_trait::async_trait;
 
-use lothal_ontology::llm_function::{InvokeRequest, InvokeResponse, LlmInvoker};
+use lothal_ontology::llm_function::{
+    ChatInvokeRequest, ChatInvokeResponse, InvokeRequest, InvokeResponse, LlmInvoker,
+};
 
 use crate::provider::{CompletionRequest, LlmClient, Message, Role};
 
@@ -72,6 +74,28 @@ impl LlmInvoker for LlmClientInvoker {
         };
 
         Ok(InvokeResponse {
+            content,
+            model,
+            tokens_in,
+            tokens_out,
+        })
+    }
+
+    async fn chat_invoke(
+        &self,
+        req: &ChatInvokeRequest,
+    ) -> Result<ChatInvokeResponse, anyhow::Error> {
+        let (content, model, tokens_in, tokens_out) = self
+            .client
+            .chat_with_tools_for_tier(
+                req.tier,
+                &req.system,
+                req.messages.clone(),
+                req.tools.clone(),
+                req.max_tokens,
+            )
+            .await?;
+        Ok(ChatInvokeResponse {
             content,
             model,
             tokens_in,

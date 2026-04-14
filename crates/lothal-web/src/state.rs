@@ -13,4 +13,7 @@ pub struct AppState {
     pub readings_tx: broadcast::Sender<ReadingEvent>,
     /// Registry of ontology actions invocable from the web UI.
     pub registry: Arc<lothal_ontology::ActionRegistry>,
+    /// Registry of LLM functions. `None` when no provider is configured;
+    /// the chat handler renders a canonical error bubble in that case.
+    pub llm_functions: Option<Arc<lothal_ontology::LlmFunctionRegistry>>,
 }

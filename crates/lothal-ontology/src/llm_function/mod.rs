@@ -91,6 +91,49 @@ pub struct InvokeResponse {
 #[async_trait]
 pub trait LlmInvoker: Send + Sync {
     async fn invoke(&self, req: &InvokeRequest) -> Result<InvokeResponse, anyhow::Error>;
+
+    /// Multi-turn chat with tool-use. Used by [`LlmFunction`] impls like
+    /// `entity_chat` whose LLM call needs to carry prior assistant + user
+    /// turns and optional tool definitions, and whose response may contain
+    /// `tool_use` blocks the caller must dispatch.
+    ///
+    /// Default impl returns an error — providers that don't support tools
+    /// (e.g. a narrow local-only invoker) simply leave it unimplemented.
+    async fn chat_invoke(
+        &self,
+        _req: &ChatInvokeRequest,
+    ) -> Result<ChatInvokeResponse, anyhow::Error> {
+        Err(anyhow::anyhow!(
+            "chat_invoke not supported by this LlmInvoker"
+        ))
+    }
+}
+
+/// Shape of a multi-turn chat call with optional tool-use.
+///
+/// Used by the `entity_chat` function to thread prior assistant + user
+/// turns back to the model. The `messages` vector carries pre-formatted
+/// message objects (role + content-blocks or string) in the Anthropic
+/// Messages-API shape; `tools` is the tool catalog the model may call.
+#[derive(Debug, Clone)]
+pub struct ChatInvokeRequest {
+    pub tier: ModelTier,
+    pub system: String,
+    pub messages: Vec<serde_json::Value>,
+    pub tools: Vec<serde_json::Value>,
+    pub max_tokens: u32,
+}
+
+/// Result of a single chat-style LLM call.
+///
+/// `content` carries the raw assistant content blocks (mix of `text` and
+/// `tool_use`); the caller parses it to drive the tool-use loop.
+#[derive(Debug, Clone)]
+pub struct ChatInvokeResponse {
+    pub content: Vec<serde_json::Value>,
+    pub model: String,
+    pub tokens_in: Option<u32>,
+    pub tokens_out: Option<u32>,
 }
 
 /// Execution context handed to every [`LlmFunction::run`] call.

@@ -312,11 +312,11 @@ async fn first_site_address(pool: &sqlx::PgPool) -> Option<String> {
 // Chat (entity-scoped, tool-enabled)
 // ---------------------------------------------------------------------------
 
-/// Maximum number of Claude tool-use rounds before giving up and returning
-/// whatever assistant text was last produced.
+/// Maximum number of tool-use rounds before giving up and returning whatever
+/// assistant text was last produced. Each round writes one `llm_calls` trace
+/// row via the `entity_chat` function; tool dispatch happens between rounds
+/// and doesn't itself hit the LLM.
 const CHAT_MAX_TOOL_ROUNDS: usize = 5;
-const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
-const ANTHROPIC_VERSION: &str = "2023-06-01";
 
 #[derive(Debug, Deserialize)]
 pub struct ChatForm {
@@ -332,8 +332,8 @@ async fn chat_send(
         .map_err(|e| WebError::BadRequest(format!("invalid uuid: {e}")))?;
     let uri = ObjectUri::new(kind.clone(), id);
 
-    // Fetch a lightweight view to get display_name for the system prompt
-    // and the user preamble. Failures bubble up as 404/500.
+    // Fetch a lightweight view to get display_name for the entity preamble.
+    // Failures bubble up as 404/500.
     let view = query::get_object_view(
         &state.pool,
         &uri,
@@ -352,32 +352,28 @@ async fn chat_send(
     // Always render the user's message as a right-aligned bubble first.
     let user_bubble = render_user_bubble(&form.message);
 
-    // Only Anthropic is supported for tool-use right now; other providers
-    // would require a different loop shape. If the key is missing, render
-    // the canonical error bubble and return early.
-    let api_key = match std::env::var("ANTHROPIC_API_KEY") {
-        Ok(k) if !k.is_empty() => k,
-        _ => {
+    let functions = match &state.llm_functions {
+        Some(f) => f.clone(),
+        None => {
             return Ok(Html(format!(
                 "{user_bubble}{bubble}",
                 bubble = render_error_bubble(
-                    "LLM not configured. Set ANTHROPIC_API_KEY or LOTHAL_LLM_PROVIDER.",
+                    "LLM not configured. Set ANTHROPIC_API_KEY (or LOTHAL_FRONTIER_PROVIDER).",
                 ),
             )));
         }
     };
-    let model = std::env::var("ANTHROPIC_MODEL").unwrap_or_else(|_| "claude-opus-4-6".into());
 
-    let system = format!(
-        "You are Lothal, a homestead operations agent. The current conversation is scoped to \
-         entity lothal://{kind}/{id} — a {display_or_kind}. You have tools to read the ontology \
-         (get_object, neighbors, events, timeline, search) and to invoke actions (run_action). \
-         Use them when a question requires data beyond your context. Be concise and actionable.",
-        display_or_kind = if display_name.is_empty() { kind.as_str() } else { display_name.as_str() },
-    );
+    // Entity context goes in the first user message so the `entity_chat`
+    // function's system prompt (and thus its sha256 prompt_hash) stays
+    // constant across entities.
+    let display_or_kind = if display_name.is_empty() {
+        kind.as_str()
+    } else {
+        display_name.as_str()
+    };
     let preamble = format!(
-        "User is viewing: {name} ({kind}).\n\n{msg}",
-        name = if display_name.is_empty() { kind.as_str() } else { display_name.as_str() },
+        "I'm viewing entity lothal://{kind}/{id} — a {display_or_kind} ({kind}).\n\n{msg}",
         msg = form.message,
     );
 
@@ -387,58 +383,41 @@ async fn chat_send(
         "content": [{ "type": "text", "text": preamble }],
     })];
 
-    let http = reqwest::Client::new();
     let mut last_text = String::new();
 
-    // Tool-use loop: call Claude, dispatch any tool_use blocks, feed
-    // tool_result blocks back, repeat. Capped at CHAT_MAX_TOOL_ROUNDS.
+    // Tool-use loop: each iteration invokes `entity_chat` (which writes one
+    // `llm_calls` row), parses the returned content blocks, dispatches any
+    // tool_use blocks locally, and feeds tool_result blocks back for the
+    // next round. Capped at CHAT_MAX_TOOL_ROUNDS.
     for _ in 0..CHAT_MAX_TOOL_ROUNDS {
-        let body = json!({
-            "model": model,
-            "max_tokens": 2048,
-            "system": system,
-            "tools": tool_catalog,
-            "messages": messages,
-        });
-
-        let resp = match http
-            .post(ANTHROPIC_API_URL)
-            .header("x-api-key", &api_key)
-            .header("anthropic-version", ANTHROPIC_VERSION)
-            .header("content-type", "application/json")
-            .json(&body)
-            .send()
+        let call = match functions
+            .invoke(
+                "entity_chat",
+                "web:chat",
+                state.pool.clone(),
+                json!({ "messages": messages, "tools": tool_catalog }),
+                None,
+                None,
+            )
             .await
         {
-            Ok(r) => r,
+            Ok(c) => c,
             Err(e) => {
                 return Ok(Html(format!(
                     "{user_bubble}{bubble}",
-                    bubble = render_error_bubble(&format!("LLM request failed: {e}")),
-                )));
-            }
-        };
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            return Ok(Html(format!(
-                "{user_bubble}{bubble}",
-                bubble = render_error_bubble(&format!("Anthropic {status}: {text}")),
-            )));
-        }
-        let data: Value = match resp.json().await {
-            Ok(v) => v,
-            Err(e) => {
-                return Ok(Html(format!(
-                    "{user_bubble}{bubble}",
-                    bubble = render_error_bubble(&format!("Invalid Anthropic response: {e}")),
+                    bubble = render_error_bubble(&format!("entity_chat failed: {e}")),
                 )));
             }
         };
 
-        // Accumulate any text blocks so we can display the final assistant
-        // message even if we also executed tools this round.
-        let content = data["content"].as_array().cloned().unwrap_or_default();
+        let content: Vec<Value> = call
+            .output
+            .as_ref()
+            .and_then(|v| v.0.get("content"))
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+
         let round_text = content
             .iter()
             .filter(|b| b["type"] == "text")
@@ -449,7 +428,6 @@ async fn chat_send(
             last_text = round_text;
         }
 
-        // Collect tool_use blocks; if none, we're done.
         let tool_uses: Vec<&Value> =
             content.iter().filter(|b| b["type"] == "tool_use").collect();
         if tool_uses.is_empty() {
@@ -457,10 +435,7 @@ async fn chat_send(
         }
 
         // Echo the assistant turn verbatim so tool_use_ids line up.
-        messages.push(json!({
-            "role": "assistant",
-            "content": content,
-        }));
+        messages.push(json!({ "role": "assistant", "content": content }));
 
         // Dispatch each tool call and append a single user turn whose
         // content is the list of tool_result blocks (echoing tool_use_id).

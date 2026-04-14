@@ -178,6 +178,28 @@ impl LlmClient {
         self.pick(tier).ok().map(|b| b.model_name())
     }
 
+    /// Multi-turn chat with optional tool_use. Only supported when the
+    /// resolved backend is Anthropic — Ollama returns
+    /// `AiError::ProviderNotConfigured` since local models don't speak the
+    /// same tool-use protocol.
+    ///
+    /// Returns `(content_blocks, model, tokens_in, tokens_out)`.
+    pub async fn chat_with_tools_for_tier(
+        &self,
+        tier: ModelTier,
+        system: &str,
+        messages: Vec<serde_json::Value>,
+        tools: Vec<serde_json::Value>,
+        max_tokens: u32,
+    ) -> Result<(Vec<serde_json::Value>, String, Option<u32>, Option<u32>), AiError> {
+        match self.pick(tier)? {
+            Backend::Anthropic(p) => p.chat_with_tools(system, messages, tools, max_tokens).await,
+            Backend::Ollama(_) => Err(AiError::ProviderNotConfigured(
+                "chat_with_tools requires Anthropic (Ollama tool-use not supported)".into(),
+            )),
+        }
+    }
+
     /// Legacy / tier-agnostic completion. Routes to the frontier tier;
     /// existing callers (e.g. bill extraction validators) keep working
     /// without change.

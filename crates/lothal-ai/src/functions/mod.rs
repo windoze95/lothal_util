@@ -5,10 +5,12 @@
 
 pub mod calm_briefing;
 pub mod diagnose_briefing;
+pub mod entity_chat;
 pub mod nilm_label;
 
 pub use calm_briefing::CalmBriefingFunction;
 pub use diagnose_briefing::DiagnoseBriefingFunction;
+pub use entity_chat::EntityChatFunction;
 pub use nilm_label::NilmLabelFunction;
 
 use std::sync::Arc;
@@ -36,6 +38,7 @@ pub fn default_registry(invoker: Arc<dyn LlmInvoker>) -> Arc<LlmFunctionRegistry
     // `lothal-ai`-native functions (not paired with an ontology action).
     reg.register(Arc::new(CalmBriefingFunction));
     reg.register(Arc::new(DiagnoseBriefingFunction));
+    reg.register(Arc::new(EntityChatFunction));
     reg.register(Arc::new(NilmLabelFunction));
 
     Arc::new(reg)

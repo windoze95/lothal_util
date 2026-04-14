@@ -107,6 +107,56 @@ impl AnthropicProvider {
         ))
     }
 
+    /// Multi-turn chat with optional tool_use, returning the full content
+    /// array from Anthropic so callers can drive the tool-use loop. Used by
+    /// [`crate::invoker::LlmClientInvoker::chat_invoke`].
+    pub async fn chat_with_tools(
+        &self,
+        system: &str,
+        messages: Vec<serde_json::Value>,
+        tools: Vec<serde_json::Value>,
+        max_tokens: u32,
+    ) -> Result<(Vec<serde_json::Value>, String, Option<u32>, Option<u32>), AiError> {
+        let mut body = json!({
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "system": system,
+            "messages": messages,
+        });
+        if !tools.is_empty() {
+            body["tools"] = json!(tools);
+        }
+
+        let resp = self
+            .client
+            .post(ANTHROPIC_API_URL)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", ANTHROPIC_VERSION)
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(AiError::LlmRequest(format!("Anthropic {status}: {text}")));
+        }
+
+        let data: serde_json::Value = resp.json().await?;
+        let content = data["content"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let model = data["model"]
+            .as_str()
+            .unwrap_or(&self.model)
+            .to_string();
+        let tokens_in = data["usage"]["input_tokens"].as_u64().map(|n| n as u32);
+        let tokens_out = data["usage"]["output_tokens"].as_u64().map(|n| n as u32);
+        Ok((content, model, tokens_in, tokens_out))
+    }
+
     pub async fn check_status(&self) -> Result<String, AiError> {
         // Send a minimal request to verify the API key works.
         let body = json!({

@@ -15,6 +15,7 @@ pub use link::{LinkRecord, LinkSpec};
 pub use event::{EventRecord, EventSpec};
 pub use action::{Action, ActionRegistry, ActionCtx, ActionError};
 pub use llm_function::{
-    InvokeRequest, InvokeResponse, LlmCall, LlmFunction, LlmFunctionCtx, LlmFunctionError,
-    LlmFunctionOutput, LlmFunctionRegistry, LlmInvoker, ModelTier,
+    ChatInvokeRequest, ChatInvokeResponse, InvokeRequest, InvokeResponse, LlmCall, LlmFunction,
+    LlmFunctionCtx, LlmFunctionError, LlmFunctionOutput, LlmFunctionRegistry, LlmInvoker,
+    ModelTier,
 };

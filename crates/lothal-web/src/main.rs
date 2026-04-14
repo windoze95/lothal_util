@@ -65,6 +65,7 @@ async fn main() -> anyhow::Result<()> {
         pool,
         readings_tx,
         registry,
+        llm_functions,
     };
 
     let app = routes::build_router()
