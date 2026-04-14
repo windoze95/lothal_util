@@ -3,14 +3,10 @@
 //!
 //! Every LLM call issued from inside an `LlmFunction::run` body flows through
 //! [`LlmClientInvoker::invoke`], which turns an [`InvokeRequest`] into a
-//! [`CompletionRequest`] and dispatches to the wrapped [`LlmClient`]. The
-//! returned [`InvokeResponse`] carries the concrete model name and token
-//! counts so the `LlmFunctionRegistry` can record them on the trace row.
-//!
-//! Phase 2 holds a single [`LlmClient`]; Phase 3 will replace this with a
-//! tier-aware dispatcher that picks between a local-tier provider (Ollama)
-//! and a frontier-tier provider (Anthropic) based on
-//! [`InvokeRequest::tier`].
+//! [`CompletionRequest`] and dispatches to the wrapped [`LlmClient`] on the
+//! tier declared by the function. The returned [`InvokeResponse`] carries
+//! the concrete model name and token counts so the `LlmFunctionRegistry` can
+//! record them on the trace row.
 
 use async_trait::async_trait;
 
@@ -18,12 +14,9 @@ use lothal_ontology::llm_function::{InvokeRequest, InvokeResponse, LlmInvoker};
 
 use crate::provider::{CompletionRequest, LlmClient, Message, Role};
 
-/// Wraps a single [`LlmClient`] and exposes it as an [`LlmInvoker`].
-///
-/// In Phase 2 the tier is recorded but not used to route — every call goes to
-/// the wrapped client regardless of tier. Phase 3 will introduce a
-/// tier-aware variant that carries a local + frontier client and routes on
-/// `req.tier`.
+/// Wraps an [`LlmClient`] (two-tier: local + frontier) and exposes it as an
+/// [`LlmInvoker`]. Each [`InvokeRequest::tier`] drives which provider
+/// actually runs the call.
 pub struct LlmClientInvoker {
     client: LlmClient,
 }
@@ -50,18 +43,24 @@ impl LlmInvoker for LlmClientInvoker {
 
         let (content, model, tokens_in, tokens_out) = match &req.json_schema {
             Some(schema) => {
-                // Structured-output path. `LlmClient::complete_json` discards
-                // the `CompletionResponse` metadata today, so for accurate
-                // trace rows we separately hit `complete` first when we need
-                // token counts — but that's a Phase-3 concern. For now, the
-                // JSON result has no model/token metadata and we fall back to
-                // the client's configured model name + `None` counts.
-                let value = self.client.complete_json(&completion, schema).await?;
-                let model = self.client.model_name().to_string();
+                // `complete_json_for_tier` returns only the parsed JSON; the
+                // CompletionResponse metadata isn't threaded through today,
+                // so the trace row's model comes from the resolved provider
+                // and `tokens_in`/`tokens_out` stay NULL. Text-mode calls
+                // below get the richer shape.
+                let value = self
+                    .client
+                    .complete_json_for_tier(req.tier, &completion, schema)
+                    .await?;
+                let model = self
+                    .client
+                    .model_name_for_tier(req.tier)
+                    .unwrap_or("unknown")
+                    .to_string();
                 (value, model, None, None)
             }
             None => {
-                let response = self.client.complete(&completion).await?;
+                let response = self.client.complete_for_tier(req.tier, &completion).await?;
                 let content = serde_json::Value::String(response.content);
                 (
                     content,
